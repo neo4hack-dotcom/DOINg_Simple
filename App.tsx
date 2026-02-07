@@ -13,7 +13,7 @@ import Login from './components/Login';
 import AIChatSidebar from './components/AIChatSidebar';
 import NotesManager from './components/NotesManager'; 
 
-import { loadState, saveState, getFullMockData } from './services/storage';
+import { loadState, saveState } from './services/storage';
 import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
 import { Search, Bell, Sun, Moon, Bot } from 'lucide-react';
 
@@ -91,14 +91,6 @@ const App: React.FC = () => {
           users: appState.users.map(u => u.id === userId ? { ...u, password: newPass } : u)
       });
   }
-
-  // --- Inject Mock Data Handler ---
-  const handleInjectMockData = () => {
-      const mockData = getFullMockData();
-      setAppState(mockData);
-      saveState(mockData);
-      window.location.reload();
-  };
 
   // --- CRUD Handlers ---
 
@@ -356,7 +348,6 @@ const App: React.FC = () => {
             appState={appState} 
             onSave={handleUpdateLLMConfig} 
             onImport={handleImportState} 
-            onInjectData={handleInjectMockData}
             onUpdateUserPassword={handleUpdateUserPassword}
         />;
       default:

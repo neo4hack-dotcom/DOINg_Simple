@@ -3,18 +3,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppState, LLMConfig, LLMProvider, User, UserRole } from '../types';
 import { fetchOllamaModels, DEFAULT_PROMPTS } from '../services/llmService';
 import { clearState } from '../services/storage';
-import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, TestTube, Trash2, AlertOctagon, MessageSquare, RotateCcw } from 'lucide-react';
+import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson } from 'lucide-react';
 
 interface SettingsPanelProps {
   config: LLMConfig;
   appState: AppState | null; // Needed for export and user management
   onSave: (config: LLMConfig, prompts?: Record<string, string>) => void;
   onImport: (newState: AppState) => void;
-  onInjectData?: () => void; // New prop for test data
   onUpdateUserPassword?: (userId: string, newPass: string) => void; 
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave, onImport, onUpdateUserPassword, onInjectData }) => {
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave, onImport, onUpdateUserPassword }) => {
   const [localConfig, setLocalConfig] = useState<LLMConfig>(config);
   const [localPrompts, setLocalPrompts] = useState<Record<string, string>>(appState?.prompts || {});
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -63,15 +62,35 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
 
   const handleExport = () => {
     if (!appState) return;
-    const dataStr = JSON.stringify(appState, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+
+    // Create a structured backup object
+    const backupData = {
+        meta: {
+            appName: "DOINg",
+            version: "1.0",
+            exportDate: new Date().toISOString(),
+            description: "Full system backup"
+        },
+        data: appState
+    };
+
+    const dataStr = JSON.stringify(backupData, null, 2);
+    
+    // Use Blob to handle larger files (especially with Base64 images in notes)
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
     
     const exportFileDefaultName = `doing_backup_${new Date().toISOString().slice(0,10)}.json`;
     
     const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.href = url;
+    linkElement.download = exportFileDefaultName;
+    document.body.appendChild(linkElement);
     linkElement.click();
+    
+    // Cleanup
+    document.body.removeChild(linkElement);
+    URL.revokeObjectURL(url);
   };
 
   const handleImportClick = () => {
@@ -88,30 +107,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
           try {
               const content = e.target?.result;
               if (typeof content === 'string') {
-                  const parsedState = JSON.parse(content);
-                  // Basic validation
-                  if (parsedState.users && parsedState.teams) {
-                      if (window.confirm("This will overwrite current data. Are you sure?")) {
-                          onImport(parsedState);
+                  const parsedJson = JSON.parse(content);
+                  let stateToImport: AppState | null = null;
+
+                  // Check if it's the new Meta+Data format
+                  if (parsedJson.meta && parsedJson.meta.appName === 'DOINg' && parsedJson.data) {
+                      stateToImport = parsedJson.data;
+                      console.log(`Importing backup from ${parsedJson.meta.exportDate} (v${parsedJson.meta.version})`);
+                  } 
+                  // Check if it's the legacy raw format (Direct AppState)
+                  else if (parsedJson.users && parsedJson.teams) {
+                      stateToImport = parsedJson;
+                  }
+
+                  if (stateToImport) {
+                      const itemCount = (stateToImport.users?.length || 0) + (stateToImport.teams?.length || 0) + (stateToImport.notes?.length || 0);
+                      if (window.confirm(`Valid backup file found.\nThis will overwrite current data with ${itemCount} items.\n\nAre you sure you want to proceed?`)) {
+                          onImport(stateToImport);
                       }
                   } else {
-                      alert("Invalid file format.");
+                      alert("Invalid file format. Please upload a valid DOINg backup JSON.");
                   }
               }
           } catch (error) {
               console.error("JSON Parse Error", error);
-              alert("Error reading JSON file.");
+              alert("Error reading JSON file. The file might be corrupted.");
           }
       }
       reader.readAsText(fileObj);
       // Reset input
       event.target.value = '';
-  }
-
-  const handleConfirmInject = () => {
-      if (window.confirm("WARNING: This will overwrite your current data with simulation test data. Continue?")) {
-          if (onInjectData) onInjectData();
-      }
   }
 
   const handleResetApp = () => {
@@ -263,13 +288,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                     
                     <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
                         <div className="text-sm text-slate-600 dark:text-slate-400">
-                            <p className="font-semibold mb-1">Backup & Restore</p>
-                            <p>Export full database to JSON or restore from backup.</p>
+                            <p className="font-semibold mb-1 flex items-center gap-2 text-indigo-900 dark:text-indigo-300">
+                                <FileJson className="w-4 h-4"/> Backup & Restore
+                            </p>
+                            <p>Full database export in structured JSON format.</p>
                         </div>
                         <div className="flex gap-3">
                             <button 
                                 onClick={handleExport}
-                                className="flex items-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg transition-colors font-medium text-sm"
+                                className="flex items-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg transition-colors font-medium text-sm shadow-sm"
                             >
                                 <Download className="w-4 h-4 mr-2" />
                                 Export JSON
@@ -283,26 +310,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                             />
                             <button 
                                 onClick={handleImportClick}
-                                className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium text-sm"
+                                className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium text-sm shadow-sm"
                             >
                                 <Upload className="w-4 h-4 mr-2" />
                                 Import JSON
                             </button>
                         </div>
-                    </div>
-
-                    <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-col md:flex-row gap-4 justify-between items-center">
-                        <div className="text-sm text-slate-600 dark:text-slate-400">
-                            <p className="font-semibold mb-1 flex items-center gap-2"><TestTube className="w-4 h-4 text-amber-500"/> Test Data Injection</p>
-                            <p>Inject dummy data (Users, Teams, Projects) for testing/demo purposes.</p>
-                        </div>
-                        <button 
-                            onClick={handleConfirmInject}
-                            className="flex items-center px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition-colors font-medium text-sm"
-                        >
-                            <Database className="w-4 h-4 mr-2" />
-                            Inject Mock Data
-                        </button>
                     </div>
 
                     {/* Danger Zone: Reset App */}

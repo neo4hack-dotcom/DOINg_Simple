@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, LLMConfig, LLMProvider, User, UserRole } from '../types';
-import { fetchOllamaModels, DEFAULT_PROMPTS } from '../services/llmService';
+import { fetchOllamaModels, DEFAULT_PROMPTS, testConnection } from '../services/llmService';
 import { clearState } from '../services/storage';
-import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson } from 'lucide-react';
+import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle } from 'lucide-react';
 
 interface SettingsPanelProps {
   config: LLMConfig;
@@ -20,6 +20,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
   const [loadingModels, setLoadingModels] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [activeTab, setActiveTab] = useState<'general' | 'prompts'>('general');
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // User Password Management State
@@ -43,6 +44,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
     if (models.length > 0 && (!localConfig.model || !models.includes(localConfig.model))) {
       setLocalConfig(prev => ({ ...prev, model: models[0] }));
     }
+  };
+
+  const handleTestConnection = async () => {
+      setTestStatus('testing');
+      try {
+          const result = await testConnection(localConfig);
+          setTestStatus(result ? 'success' : 'error');
+      } catch (e) {
+          setTestStatus('error');
+      }
+      setTimeout(() => setTestStatus('idle'), 3000);
   };
 
   const handleSave = () => {
@@ -349,10 +361,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                 {/* Provider Selection */}
                 <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">AI Provider</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
                         { id: 'ollama', label: 'Ollama (Local)', icon: <Server className="w-4 h-4"/> },
-                        { id: 'local_http', label: 'Custom HTTP', icon: <Link className="w-4 h-4"/> }
+                        { id: 'local_http', label: 'Custom HTTP', icon: <Link className="w-4 h-4"/> },
+                        { id: 'n8n', label: 'n8n Webhook', icon: <Workflow className="w-4 h-4"/> }
                     ].map((provider) => (
                         <button
                         key={provider.id}
@@ -434,6 +447,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                         />
                         </div>
                         <div>
+                        <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Model Name (Optional)</label>
+                        <input 
+                            type="text"
+                            value={localConfig.model || ''}
+                            onChange={e => setLocalConfig({...localConfig, model: e.target.value})}
+                            className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            placeholder="e.g. gpt-4-turbo, local-model..." 
+                        />
+                        </div>
+                        <div>
                         <label className="block text-xs font-bold uppercase text-slate-500 mb-1">API Key (Optional)</label>
                         <div className="relative">
                             <Key className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
@@ -448,6 +471,52 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                         </div>
                     </div>
                     )}
+
+                    {localConfig.provider === 'n8n' && (
+                    <div className="space-y-4 animate-in fade-in">
+                        <div>
+                        <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Webhook URL</label>
+                        <input 
+                            type="text" 
+                            value={localConfig.baseUrl || ''}
+                            onChange={e => setLocalConfig({...localConfig, baseUrl: e.target.value})}
+                            className="w-full p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                            placeholder="https://your-n8n-instance.com/webhook/..."
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">Ensure your n8n workflow accepts POST requests with a JSON body containing 'prompt'.</p>
+                        </div>
+                         <div>
+                        <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Auth Token (Header Authorization)</label>
+                        <div className="relative">
+                            <Key className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+                            <input 
+                                type="password" 
+                                value={localConfig.apiKey || ''}
+                                onChange={e => setLocalConfig({...localConfig, apiKey: e.target.value})}
+                                className="w-full p-3 pl-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                placeholder="Basic ... or Bearer ..."
+                            />
+                        </div>
+                        </div>
+                    </div>
+                    )}
+
+                    {/* Test Connection Button */}
+                    <div className="flex items-center justify-between pt-2">
+                        <div className="flex items-center gap-2">
+                            {testStatus === 'success' && <span className="text-green-600 dark:text-green-400 flex items-center text-sm font-bold"><CheckCircle2 className="w-4 h-4 mr-1"/> Connected</span>}
+                            {testStatus === 'error' && <span className="text-red-600 dark:text-red-400 flex items-center text-sm font-bold"><XCircle className="w-4 h-4 mr-1"/> Connection Failed</span>}
+                        </div>
+                        <button 
+                            onClick={handleTestConnection}
+                            disabled={testStatus === 'testing' || !localConfig.baseUrl}
+                            className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center"
+                        >
+                            {testStatus === 'testing' ? <RefreshCw className="w-4 h-4 animate-spin mr-2"/> : <RefreshCw className="w-4 h-4 mr-2"/>}
+                            Test Connectivity
+                        </button>
+                    </div>
+
                 </div>
                 
                  <div className="flex justify-end pt-4">

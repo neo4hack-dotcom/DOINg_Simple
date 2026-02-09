@@ -187,7 +187,7 @@ const fillTemplate = (template: string, replacements: Record<string, string>) =>
     return result;
 }
 
-// --- Internal Helper Functions (Missing fixed) ---
+// --- Internal Helper Functions ---
 
 const buildChatContext = (history: ChatMessage[]): string => {
     return history.map(msg => {
@@ -239,7 +239,7 @@ const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string>
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-            model: config.model || 'local-model',
+            model: config.model || 'local-model', // Use the configured model
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.7
         })
@@ -254,7 +254,58 @@ const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string>
     return data.choices?.[0]?.message?.content || data.content || JSON.stringify(data);
 };
 
+const callN8n = async (prompt: string, config: LLMConfig): Promise<string> => {
+    const url = config.baseUrl;
+    if (!url) throw new Error("N8N Webhook URL is missing");
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+    if (config.apiKey) {
+        headers['Authorization'] = config.apiKey; // Usually Bearer or Basic, or just the key depending on n8n setup
+    }
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+            prompt: prompt,
+            model: config.model,
+            // Send timestamp to avoid caching issues sometimes
+            timestamp: new Date().toISOString()
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`N8N Webhook Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // N8N return flexibility: check for 'output', 'text', 'response' or return full JSON string
+    if (typeof data === 'string') return data;
+    return data.output || data.text || data.response || data.content || JSON.stringify(data);
+};
+
 // --- Public API ---
+
+export const testConnection = async (config: LLMConfig): Promise<boolean> => {
+    try {
+        const pingPrompt = "Hello, are you online? Respond with 'Yes'.";
+        let res = "";
+        if (config.provider === 'ollama') {
+            res = await callOllama(pingPrompt, config);
+        } else if (config.provider === 'local_http') {
+            res = await callLocalHttp(pingPrompt, config);
+        } else if (config.provider === 'n8n') {
+            res = await callN8n(pingPrompt, config);
+        }
+        return !!res;
+    } catch (e) {
+        console.error("Connection Test Failed", e);
+        throw e;
+    }
+};
 
 export const generateTeamReport = async (team: Team, manager: User | undefined, config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
   const data = prepareTeamData(team, manager);
@@ -288,6 +339,66 @@ export const generateWeeklyReportSummary = async (report: WeeklyReport, user: Us
     return runPrompt(prompt, config);
 }
 
+export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], config: LLMConfig): Promise<Record<string, string>> => {
+    // 1. Prepare Data
+    const reportsText = selectedReports.map(r => {
+        const u = users.find(user => user.id === r.userId);
+        return `
+        REPORT FROM: ${u?.firstName} ${u?.lastName}
+        TEAM HEALTH: ${r.teamHealth}, PROJECT HEALTH: ${r.projectHealth}
+        SUCCESS: ${r.mainSuccess}
+        ISSUES: ${r.mainIssue}
+        INCIDENTS: ${r.incident}
+        ORGA: ${r.orgaPoint}
+        OTHER: ${r.otherSection}
+        ----------------------------------------------
+        `;
+    }).join('\n');
+
+    const prompt = `
+    You are a manager consolidating the weekly reports of your team.
+    
+    SOURCE DATA:
+    ${reportsText}
+
+    TASK:
+    Synthesize all these reports into a single consolidated report.
+    You must extract the most important information and group it into the following 5 categories.
+    
+    CRITICAL: RETURN ONLY A VALID JSON OBJECT. NO MARKDOWN. NO CODE BLOCKS.
+    
+    Structure required:
+    {
+      "mainSuccess": "Consolidated text of main achievements...",
+      "mainIssue": "Consolidated text of blocking issues...",
+      "incident": "Consolidated text of incidents...",
+      "orgaPoint": "Consolidated text of HR/Orga points...",
+      "otherSection": "Any other relevant info..."
+    }
+    
+    Language: English.
+    `;
+
+    const rawResponse = await runPrompt(prompt, config);
+    
+    // Attempt parsing
+    try {
+        // Cleaning markdown code blocks if present
+        const cleanJson = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleanJson);
+        return parsed;
+    } catch (e) {
+        console.error("Failed to parse JSON from AI", rawResponse);
+        return {
+            mainSuccess: "",
+            mainIssue: "",
+            incident: "",
+            orgaPoint: "",
+            otherSection: rawResponse // Fallback: put everything in 'other' if parse fails
+        };
+    }
+}
+
 export const generateManagementInsight = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
     const data = prepareManagementData(teams, reports, users);
     const template = customPrompts?.['management_insight'] || DEFAULT_PROMPTS.management_insight;
@@ -295,7 +406,6 @@ export const generateManagementInsight = async (teams: Team[], reports: WeeklyRe
     return runPrompt(prompt, config);
 }
 
-// Keeping original hardcoded prompts for complex tasks like Risk Assessment & Note Summary for now (less likely to be edited by user)
 export const generateRiskAssessment = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig): Promise<string> => {
     // 1. Collect Project Context
     const projectContext = teams.flatMap(t => t.projects.map(p => {
@@ -434,6 +544,8 @@ const runPrompt = async (prompt: string, config: LLMConfig, images: string[] = [
             return await callOllama(prompt, config, images);
           case 'local_http':
             return await callLocalHttp(prompt, config);
+          case 'n8n':
+            return await callN8n(prompt, config);
           default:
             return `Provider ${config.provider} not supported.`;
         }

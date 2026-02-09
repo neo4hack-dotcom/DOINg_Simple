@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus } from '../types';
-import { generateWeeklyReportSummary } from '../services/llmService';
+import { generateWeeklyReportSummary, generateConsolidatedReport } from '../services/llmService';
 import FormattedText from './FormattedText';
-import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download } from 'lucide-react';
+import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive } from 'lucide-react';
 
 interface WeeklyReportProps {
   reports: WeeklyReportType[];
@@ -14,12 +14,17 @@ interface WeeklyReportProps {
 }
 
 const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser, llmConfig, onSaveReport }) => {
-  const [activeTab, setActiveTab] = useState<'my-report' | 'team-reports'>('my-report');
+  const [activeTab, setActiveTab] = useState<'my-report' | 'team-reports' | 'archives'>('my-report');
   
   // AI State
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [generatedEmail, setGeneratedEmail] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Auto-Fill State
+  const [showAutoFillModal, setShowAutoFillModal] = useState(false);
+  const [selectedReportIdsForFill, setSelectedReportIdsForFill] = useState<string[]>([]);
+  const [isFilling, setIsFilling] = useState(false);
 
   // Helper to get current week's Monday
   const getMonday = (d: Date) => {
@@ -102,6 +107,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
   const handleLoadReport = (report: WeeklyReportType) => {
       setCurrentReport({ ...report });
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      setActiveTab('my-report'); // Switch to edit tab when loading
   };
 
   const handleResetToCurrent = () => {
@@ -124,6 +130,37 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
         });
       }
   };
+
+  const handleToggleReportSelection = (id: string) => {
+      if (selectedReportIdsForFill.includes(id)) {
+          setSelectedReportIdsForFill(selectedReportIdsForFill.filter(i => i !== id));
+      } else {
+          setSelectedReportIdsForFill([...selectedReportIdsForFill, id]);
+      }
+  }
+
+  const handleAutoFill = async () => {
+      if (!llmConfig) return alert("AI Configuration missing");
+      if (selectedReportIdsForFill.length === 0) return alert("Select at least one report");
+      
+      setIsFilling(true);
+      const reportsToProcess = reports.filter(r => selectedReportIdsForFill.includes(r.id));
+      
+      const consolidated = await generateConsolidatedReport(reportsToProcess, users, llmConfig);
+      
+      setCurrentReport({
+          ...currentReport,
+          mainSuccess: consolidated.mainSuccess || currentReport.mainSuccess,
+          mainIssue: consolidated.mainIssue || currentReport.mainIssue,
+          incident: consolidated.incident || currentReport.incident,
+          orgaPoint: consolidated.orgaPoint || currentReport.orgaPoint,
+          otherSection: consolidated.otherSection || currentReport.otherSection
+      });
+
+      setIsFilling(false);
+      setShowAutoFillModal(false);
+      setSelectedReportIdsForFill([]);
+  }
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedEmail);
@@ -153,15 +190,175 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       }
   };
 
-  // Filter reports for Team View (Everyone's reports)
+  // --- DATA PROCESSING FOR ARCHIVES AND AUTO-FILL ---
+
+  // 1. Sort all reports desc (Newest -> Oldest)
   const sortedReports = [...reports].sort((a, b) => new Date(b.weekOf).getTime() - new Date(a.weekOf).getTime());
 
-  // My History Reports
+  // 2. Calculate Cutoff Date (3 months ago)
+  const today = new Date();
+  const threeMonthsAgo = new Date(today.setMonth(today.getMonth() - 3));
+
+  // 3. Split reports
+  const recentReports = sortedReports.filter(r => new Date(r.weekOf) >= threeMonthsAgo);
+  const archivedReports = sortedReports.filter(r => new Date(r.weekOf) < threeMonthsAgo);
+
+  // My History (User specific, show all for editing purposes, but we could split if needed. Keep all for now in the table)
   const myHistory = sortedReports.filter(r => r.userId === currentUser?.id);
+
+  // 4. Group reports by user for Auto-Fill Modal
+  // RULE: Only propose "recentReports" (< 3 months) for AI Auto-Fill
+  const reportsByUserForAutoFill = recentReports.reduce((acc, report) => {
+      // Exclude current user's OWN report to avoid circular logic
+      if (report.id === currentReport.id) return acc;
+
+      if (!acc[report.userId]) acc[report.userId] = [];
+      acc[report.userId].push(report);
+      return acc;
+  }, {} as Record<string, WeeklyReportType[]>);
+
+  // Render content helper to avoid code duplication between Recent and Archive views
+  const renderReportList = (reportsList: WeeklyReportType[], emptyMessage: string) => (
+      <div className="grid grid-cols-1 gap-6 animate-in fade-in">
+          {reportsList.map(report => {
+              const author = users.find(u => u.id === report.userId);
+              return (
+                  <div key={report.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                          <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold">
+                                  {author?.firstName[0]}{author?.lastName[0]}
+                              </div>
+                              <div>
+                                  <h3 className="font-bold text-slate-900 dark:text-white">{author?.firstName} {author?.lastName}</h3>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">{getWeekLabel(report.weekOf)}</p>
+                              </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                              {/* AI Replay Button for History */}
+                              <button 
+                                  onClick={() => handleGenerateEmail(report)}
+                                  className="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                  title="Regenerate AI Summary"
+                              >
+                                  <Bot className="w-4 h-4" />
+                              </button>
+
+                              <div className="flex gap-1 items-center" title="Team/Project Health">
+                                  <div className={`w-3 h-3 rounded-full ${getHealthColor(report.teamHealth)}`}></div>
+                                  <div className={`w-3 h-3 rounded-full ${getHealthColor(report.projectHealth)}`}></div>
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                  Updated: {new Date(report.updatedAt).toLocaleDateString()}
+                              </div>
+                          </div>
+                      </div>
+                      <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div>
+                              <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-1">Success</h4>
+                              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.mainSuccess || '-'}</p>
+                          </div>
+                          <div>
+                              <h4 className="text-xs font-bold text-red-600 dark:text-red-400 uppercase mb-1">Issues</h4>
+                              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.mainIssue || '-'}</p>
+                          </div>
+                          <div>
+                              <h4 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase mb-1">Incidents</h4>
+                              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.incident || '-'}</p>
+                          </div>
+                          <div>
+                              <h4 className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase mb-1">Organization</h4>
+                              <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.orgaPoint || '-'}</p>
+                          </div>
+                          {report.otherSection && (
+                              <div className="md:col-span-2 border-t border-slate-100 dark:border-slate-800 pt-2">
+                                  <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Other</h4>
+                                  <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.otherSection}</p>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              );
+          })}
+          {reportsList.length === 0 && (
+              <div className="text-center py-12 text-slate-500 dark:text-slate-400 italic">
+                  {emptyMessage}
+              </div>
+          )}
+      </div>
+  );
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 relative">
         
+        {/* Auto Fill Modal */}
+        {showAutoFillModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col border border-slate-200 dark:border-slate-700">
+                    <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-indigo-600 rounded-t-2xl">
+                         <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                             <Wand2 className="w-5 h-5" />
+                             Generate Global Report
+                         </h3>
+                         <button onClick={() => setShowAutoFillModal(false)} className="text-white hover:text-indigo-200">
+                             <X className="w-5 h-5" />
+                         </button>
+                    </div>
+                    <div className="p-4 overflow-y-auto flex-1 bg-slate-50 dark:bg-slate-950">
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                            Select weekly reports from your team to consolidate into your current report fields.
+                            <br/>
+                            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Only showing reports from the last 3 months.</span>
+                        </p>
+                        
+                        {Object.keys(reportsByUserForAutoFill).length === 0 && <p className="text-center italic text-slate-400">No recent reports available.</p>}
+
+                        <div className="space-y-4">
+                            {Object.entries(reportsByUserForAutoFill).map(([userId, userReports]) => {
+                                const user = users.find(u => u.id === userId);
+                                const userReportsList = userReports as WeeklyReportType[];
+                                return (
+                                    <div key={userId} className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                        <div className="bg-slate-100 dark:bg-slate-700/50 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">
+                                            {user?.firstName} {user?.lastName}
+                                        </div>
+                                        <div>
+                                            {userReportsList.map(report => ( // Map all valid recent reports
+                                                <div 
+                                                    key={report.id} 
+                                                    onClick={() => handleToggleReportSelection(report.id)}
+                                                    className={`p-3 flex items-center gap-3 cursor-pointer border-b last:border-0 border-slate-100 dark:border-slate-700 transition-colors ${selectedReportIdsForFill.includes(report.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                                                >
+                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center ${selectedReportIdsForFill.includes(report.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'}`}>
+                                                        {selectedReportIdsForFill.includes(report.id) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="text-sm font-medium text-slate-800 dark:text-slate-200">{getWeekLabel(report.weekOf)}</div>
+                                                        <div className="text-xs text-slate-500 truncate max-w-[200px]">{report.mainSuccess || "No success recorded"}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                    <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3 bg-white dark:bg-slate-900 rounded-b-2xl">
+                         <button onClick={() => setShowAutoFillModal(false)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">Cancel</button>
+                         <button 
+                            onClick={handleAutoFill}
+                            disabled={isFilling || selectedReportIdsForFill.length === 0}
+                            className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-sm font-bold flex items-center gap-2 disabled:opacity-50"
+                        >
+                            {isFilling ? <Loader2 className="w-4 h-4 animate-spin"/> : <Wand2 className="w-4 h-4" />}
+                            Generate Content
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* AI Email Modal */}
         {showSummaryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -231,7 +428,13 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                 onClick={() => setActiveTab('team-reports')}
                 className={`pb-4 px-2 font-medium text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'team-reports' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
             >
-                <History className="w-4 h-4" /> Team History
+                <History className="w-4 h-4" /> Recent Reports
+            </button>
+            <button 
+                onClick={() => setActiveTab('archives')}
+                className={`pb-4 px-2 font-medium text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'archives' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+            >
+                <Archive className="w-4 h-4" /> Archives ({archivedReports.length})
             </button>
         </div>
 
@@ -297,6 +500,17 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                                     className="px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-sm font-medium transition-colors flex items-center"
                                 >
                                     <Plus className="w-4 h-4 mr-1" /> New/Current
+                                </button>
+                            )}
+
+                             {/* Consolidation Magic Button (Admin/Manager context usually) */}
+                             {llmConfig && (
+                                <button 
+                                    onClick={() => setShowAutoFillModal(true)}
+                                    className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-2 rounded-lg font-medium hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors flex items-center border border-purple-200 dark:border-purple-800 text-sm"
+                                    title="Auto-fill from recent team reports"
+                                >
+                                    <Wand2 className="w-4 h-4 mr-2" /> Auto-Fill
                                 </button>
                             )}
                             
@@ -471,75 +685,11 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
             </div>
         )}
 
-        {activeTab === 'team-reports' && (
-            <div className="grid grid-cols-1 gap-6 animate-in fade-in">
-                {sortedReports.map(report => {
-                    const author = users.find(u => u.id === report.userId);
-                    return (
-                        <div key={report.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
-                            <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold">
-                                        {author?.firstName[0]}{author?.lastName[0]}
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-slate-900 dark:text-white">{author?.firstName} {author?.lastName}</h3>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400">{getWeekLabel(report.weekOf)}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    {/* AI Replay Button for History */}
-                                    <button 
-                                        onClick={() => handleGenerateEmail(report)}
-                                        className="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                        title="Regenerate AI Summary"
-                                    >
-                                        <Bot className="w-4 h-4" />
-                                    </button>
+        {/* Tab 2: Recent Reports */}
+        {activeTab === 'team-reports' && renderReportList(recentReports, "No recent reports found (< 3 months). Check Archives.")}
 
-                                    <div className="flex gap-1 items-center" title="Team/Project Health">
-                                        <div className={`w-3 h-3 rounded-full ${getHealthColor(report.teamHealth)}`}></div>
-                                        <div className={`w-3 h-3 rounded-full ${getHealthColor(report.projectHealth)}`}></div>
-                                    </div>
-                                    <div className="text-xs text-slate-400">
-                                        Updated: {new Date(report.updatedAt).toLocaleDateString()}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-1">Success</h4>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.mainSuccess || '-'}</p>
-                                </div>
-                                <div>
-                                    <h4 className="text-xs font-bold text-red-600 dark:text-red-400 uppercase mb-1">Issues</h4>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.mainIssue || '-'}</p>
-                                </div>
-                                <div>
-                                    <h4 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase mb-1">Incidents</h4>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.incident || '-'}</p>
-                                </div>
-                                <div>
-                                    <h4 className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase mb-1">Organization</h4>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.orgaPoint || '-'}</p>
-                                </div>
-                                {report.otherSection && (
-                                    <div className="md:col-span-2 border-t border-slate-100 dark:border-slate-800 pt-2">
-                                        <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Other</h4>
-                                        <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{report.otherSection}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
-                {sortedReports.length === 0 && (
-                    <div className="text-center py-12 text-slate-500 dark:text-slate-400 italic">
-                        No reports found yet.
-                    </div>
-                )}
-            </div>
-        )}
+        {/* Tab 3: Archives */}
+        {activeTab === 'archives' && renderReportList(archivedReports, "No archived reports found (> 3 months).")}
 
     </div>
   );

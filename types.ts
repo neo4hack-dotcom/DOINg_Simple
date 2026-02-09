@@ -38,7 +38,7 @@ export enum ActionItemStatus {
   COMPLETED = 'Completed'
 }
 
-export type LLMProvider = 'ollama' | 'local_http';
+export type LLMProvider = 'ollama' | 'local_http' | 'n8n';
 
 export interface LLMConfig {
   provider: LLMProvider;

@@ -49,9 +49,10 @@ export const loadState = (): AppState => {
       if (!parsed.notes) parsed.notes = []; 
       if (!parsed.prompts) parsed.prompts = {};
       
-      // User Migration
+      // User Migration & Security Check
       if (parsed.users) {
           parsed.users = parsed.users.map((u: User) => {
+              // Ensure Admin always exists with correct creds
               if (u.uid === 'Admin' || u.uid === 'ADM001') {
                   return { ...u, firstName: 'Mathieu', uid: 'Admin', password: '59565956', role: UserRole.ADMIN };
               }
@@ -75,6 +76,16 @@ export const loadState = (): AppState => {
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {}
   };
+};
+
+// Atomic Update Function
+// This reads the *latest* state from disk, applies the change, and saves it back.
+// It prevents "Stale State" overwrites when multiple actions happen quickly.
+export const updateAppState = (updater: (currentState: AppState) => AppState): AppState => {
+    const latestState = loadState();
+    const newState = updater(latestState);
+    saveState(newState);
+    return newState;
 };
 
 export const saveState = (state: AppState) => {

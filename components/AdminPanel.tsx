@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { User, UserRole, Team } from '../types';
-import { Plus, Trash2, User as UserIcon, Shield, ChevronDown, ChevronRight, Users, Briefcase, Pencil, Save, X, MapPin } from 'lucide-react';
+import { Plus, Trash2, User as UserIcon, Shield, ChevronDown, ChevronRight, Users, Briefcase, Pencil, Save, X, MapPin, Key } from 'lucide-react';
 
 interface AdminPanelProps {
   users: User[];
@@ -74,7 +74,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
   const [userForm, setUserForm] = useState<Partial<User>>({
     role: UserRole.EMPLOYEE,
     managerId: '',
-    location: ''
+    location: '',
+    password: ''
   });
 
   // New Team State
@@ -93,12 +94,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
                   ...existingUser,
                   ...userForm as User,
                   managerId: userForm.managerId || null,
-                  location: userForm.location
+                  location: userForm.location,
+                  password: userForm.password || existingUser.password // Keep existing if empty, or update
               });
           }
           setEditingUserId(null);
       } else {
           // Create
+          // Check for Duplicate UID
+          if (users.some(u => u.uid.toLowerCase() === userForm.uid?.toLowerCase())) {
+              alert(`Error: User ID "${userForm.uid}" already exists. Please choose a different one.`);
+              return;
+          }
+
           onAddUser({
             id: Date.now().toString(),
             firstName: userForm.firstName!,
@@ -107,12 +115,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
             functionTitle: userForm.functionTitle!,
             role: userForm.role as UserRole,
             managerId: userForm.managerId || null,
-            password: '1234', // Default password
+            password: userForm.password || '1234', // Use provided password or default
             location: userForm.location
           });
       }
       // Reset
-      setUserForm({ role: UserRole.EMPLOYEE, managerId: '', location: '' });
+      setUserForm({ role: UserRole.EMPLOYEE, managerId: '', location: '', password: '' });
     } else {
         alert("Please fill all required fields.");
     }
@@ -127,13 +135,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
           functionTitle: user.functionTitle,
           role: user.role,
           managerId: user.managerId || '',
-          location: user.location || ''
+          location: user.location || '',
+          password: user.password || ''
       });
   };
 
   const handleCancelEdit = () => {
       setEditingUserId(null);
-      setUserForm({ role: UserRole.EMPLOYEE, managerId: '', location: '' });
+      setUserForm({ role: UserRole.EMPLOYEE, managerId: '', location: '', password: '' });
   };
 
   const handleCreateTeam = () => {
@@ -206,6 +215,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
                     value={userForm.uid || ''}
                     onChange={e => setUserForm({ ...userForm, uid: e.target.value })}
                 />
+                 {/* Password Field */}
+                 <div className="col-span-1 relative">
+                    <input
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white pl-8"
+                        placeholder="Password"
+                        type="text"
+                        value={userForm.password || ''}
+                        onChange={e => setUserForm({ ...userForm, password: e.target.value })}
+                    />
+                    <Key className="w-4 h-4 text-slate-400 absolute left-2.5 top-3" />
+                </div>
+
                 <input
                     className="col-span-1 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
                     placeholder="Job Title"
@@ -218,16 +239,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
                     value={userForm.location || ''}
                     onChange={e => setUserForm({ ...userForm, location: e.target.value })}
                 />
-                <select
-                    className="col-span-1 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
-                    value={userForm.role}
-                    onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })}
-                >
-                    {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
                 
                 <div className="col-span-full mt-2 grid grid-cols-6 gap-4 items-end">
-                    <div className="col-span-5">
+                    <div className="col-span-2">
+                         <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 block">Role</label>
+                         <select
+                            className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
+                            value={userForm.role}
+                            onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })}
+                        >
+                            {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                    </div>
+                    <div className="col-span-3">
                         <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 block">Reports To (Manager)</label>
                         <select
                             className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"

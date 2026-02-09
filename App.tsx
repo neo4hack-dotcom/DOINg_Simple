@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, ErrorInfo, ReactNode, Component } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
 import ProjectTracker from './components/ProjectTracker';
@@ -13,7 +12,7 @@ import Login from './components/Login';
 import AIChatSidebar from './components/AIChatSidebar';
 import NotesManager from './components/NotesManager'; 
 
-import { loadState, saveState, subscribeToStoreUpdates } from './services/storage';
+import { loadState, saveState, subscribeToStoreUpdates, updateAppState } from './services/storage';
 import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
 import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw, Radio } from 'lucide-react';
 
@@ -27,8 +26,8 @@ interface ErrorBoundaryState {
 }
 
 // --- Error Boundary for Robustness ---
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = {
     hasError: false,
     error: null
   };
@@ -136,12 +135,7 @@ const AppContent: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    // Save on change (Only if user initiated change locally)
-    if (appState) {
-      saveState(appState);
-    }
-  }, [appState]);
+  // Removed useEffect auto-save. Data is now saved explicitly in handlers to avoid stale state overwrites.
 
   // Check for stale reports
   useEffect(() => {
@@ -160,10 +154,13 @@ const AppContent: React.FC = () => {
   }, [appState?.weeklyReports, appState?.currentUser]);
 
   const toggleTheme = () => {
-      if (!appState) return;
-      const newTheme = appState.theme === 'light' ? 'dark' : 'light';
-      setAppState({ ...appState, theme: newTheme });
-      if (newTheme === 'dark') {
+      const newState = updateAppState(current => ({
+          ...current,
+          theme: current.theme === 'light' ? 'dark' : 'light'
+      }));
+      setAppState(newState);
+
+      if (newState.theme === 'dark') {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');
@@ -171,147 +168,152 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogin = (user: User) => {
-      if (!appState) return;
-      setAppState({ ...appState, currentUser: user });
-      // Reset tab on login
+      // Login is local to this tab/session mostly, but we persist "currentUser" to LS for convenience.
+      // We rely on 'updateAppState' to ensure we have the absolute latest data from disk upon login.
+      const newState = updateAppState(current => ({
+          ...current,
+          currentUser: user
+      }));
+      setAppState(newState);
       setActiveTab('dashboard');
   }
 
   const handleLogout = () => {
-      if (!appState) return;
-      setAppState({ ...appState, currentUser: null });
+      const newState = updateAppState(current => ({
+          ...current,
+          currentUser: null
+      }));
+      setAppState(newState);
       window.location.reload(); 
   }
 
   const handleUpdateUserPassword = (userId: string, newPass: string) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          users: appState.users.map(u => u.id === userId ? { ...u, password: newPass } : u)
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          users: current.users.map(u => u.id === userId ? { ...u, password: newPass } : u)
+      }));
+      setAppState(newState);
   }
 
-  // --- CRUD Handlers ---
+  // --- CRUD Handlers (USING ATOMIC UPDATES) ---
+  // Using 'updateAppState' ensures we read the disk before writing, preventing race conditions.
 
   const handleAddUser = (user: User) => {
-    if (!appState) return;
-    setAppState({
-      ...appState,
-      users: [...appState.users, user]
-    });
+    const newState = updateAppState(current => ({
+      ...current,
+      users: [...current.users, user]
+    }));
+    setAppState(newState);
   };
 
   const handleUpdateUser = (updatedUser: User) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          users: appState.users.map(u => u.id === updatedUser.id ? updatedUser : u)
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          users: current.users.map(u => u.id === updatedUser.id ? updatedUser : u)
+      }));
+      setAppState(newState);
   };
 
   const handleDeleteUser = (userId: string) => {
-    if (!appState) return;
-    setAppState({
-        ...appState,
-        users: appState.users.filter(u => u.id !== userId)
-    })
+    const newState = updateAppState(current => ({
+        ...current,
+        users: current.users.filter(u => u.id !== userId)
+    }));
+    setAppState(newState);
   }
 
   const handleAddTeam = (team: Team) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          teams: [...appState.teams, team]
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          teams: [...current.teams, team]
+      }));
+      setAppState(newState);
   };
 
   const handleDeleteTeam = (teamId: string) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          teams: appState.teams.filter(t => t.id !== teamId)
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          teams: current.teams.filter(t => t.id !== teamId)
+      }));
+      setAppState(newState);
   };
 
   const handleUpdateTeam = (updatedTeam: Team) => {
-    if (!appState) return;
-    const newTeams = appState.teams.map(t => t.id === updatedTeam.id ? updatedTeam : t);
-    setAppState({
-      ...appState,
-      teams: newTeams
+    const newState = updateAppState(current => {
+        const newTeams = current.teams.map(t => t.id === updatedTeam.id ? updatedTeam : t);
+        return { ...current, teams: newTeams };
     });
+    setAppState(newState);
   };
 
   const handleUpdateMeeting = (updatedMeeting: Meeting) => {
-    if (!appState) return;
-    const exists = appState.meetings.find(m => m.id === updatedMeeting.id);
-    let newMeetings;
-    if (exists) {
-        newMeetings = appState.meetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m);
-    } else {
-        newMeetings = [...appState.meetings, updatedMeeting];
-    }
-    // Sort by date desc
-    newMeetings.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
-    setAppState({
-        ...appState,
-        meetings: newMeetings
+    const newState = updateAppState(current => {
+        const exists = current.meetings.find(m => m.id === updatedMeeting.id);
+        let newMeetings;
+        if (exists) {
+            newMeetings = current.meetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m);
+        } else {
+            newMeetings = [...current.meetings, updatedMeeting];
+        }
+        newMeetings.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return { ...current, meetings: newMeetings };
     });
+    setAppState(newState);
   };
 
   const handleDeleteMeeting = (id: string) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          meetings: appState.meetings.filter(m => m.id !== id)
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          meetings: current.meetings.filter(m => m.id !== id)
+      }));
+      setAppState(newState);
   };
 
   const handleUpdateReport = (report: WeeklyReportType) => {
-      if (!appState) return;
-      const existingIndex = appState.weeklyReports.findIndex(r => r.id === report.id);
-      let newReports;
-      if (existingIndex >= 0) {
-          newReports = [...appState.weeklyReports];
-          newReports[existingIndex] = report;
-      } else {
-          newReports = [...appState.weeklyReports, report];
-      }
-      setAppState({
-          ...appState,
-          weeklyReports: newReports
+      const newState = updateAppState(current => {
+          const existingIndex = current.weeklyReports.findIndex(r => r.id === report.id);
+          let newReports;
+          if (existingIndex >= 0) {
+              newReports = [...current.weeklyReports];
+              newReports[existingIndex] = report;
+          } else {
+              newReports = [...current.weeklyReports, report];
+          }
+          return { ...current, weeklyReports: newReports };
       });
+      setAppState(newState);
   }
 
   const handleUpdateNote = (note: Note) => {
-      if (!appState) return;
-      const existingIndex = appState.notes.findIndex(n => n.id === note.id);
-      let newNotes;
-      if (existingIndex >= 0) {
-          newNotes = [...appState.notes];
-          newNotes[existingIndex] = note;
-      } else {
-          newNotes = [...appState.notes, note];
-      }
-      setAppState({ ...appState, notes: newNotes });
+      const newState = updateAppState(current => {
+          const existingIndex = current.notes.findIndex(n => n.id === note.id);
+          let newNotes;
+          if (existingIndex >= 0) {
+              newNotes = [...current.notes];
+              newNotes[existingIndex] = note;
+          } else {
+              newNotes = [...current.notes, note];
+          }
+          return { ...current, notes: newNotes };
+      });
+      setAppState(newState);
   };
 
   const handleDeleteNote = (id: string) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
-          notes: appState.notes.filter(n => n.id !== id)
-      });
+      const newState = updateAppState(current => ({
+          ...current,
+          notes: current.notes.filter(n => n.id !== id)
+      }));
+      setAppState(newState);
   };
 
   const handleUpdateLLMConfig = (newConfig: LLMConfig, newPrompts?: Record<string, string>) => {
-      if (!appState) return;
-      setAppState({
-          ...appState,
+      const newState = updateAppState(current => ({
+          ...current,
           llmConfig: newConfig,
-          prompts: newPrompts || appState.prompts
-      });
+          prompts: newPrompts || current.prompts
+      }));
+      setAppState(newState);
   };
 
   const handleImportState = (newState: AppState) => {

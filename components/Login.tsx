@@ -107,10 +107,6 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
             <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
-        
-        <div className="mt-8 text-center">
-            <p className="text-xs text-gray-400">© 2024 Secure Workspace</p>
-        </div>
       </div>
     </div>
   );

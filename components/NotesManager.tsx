@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Note, NoteBlock, User, LLMConfig, NoteBlockType } from '../types';
 import { generateNoteSummary } from '../services/llmService';
+import { generateId } from '../services/storage'; // Use new robust ID
 import { 
     Plus, Archive, Trash2, Search, FileText, Image as ImageIcon, 
     Square, Circle, Minus, Type, X, Bot, Loader2, Calendar, MousePointer2, Pen
@@ -34,19 +35,17 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     const [currentPath, setCurrentPath] = useState('');
     
     // Refs
-    const notesRef = useRef(notes); // Keep track of latest notes for async ops
+    const notesRef = useRef(notes); 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLDivElement>(null);
 
-    // Update ref when notes change
     useEffect(() => {
         notesRef.current = notes;
     }, [notes]);
 
-    // Initial Empty Note Logic
     const createNewNote = () => {
         const newNote: Note = {
-            id: Date.now().toString(),
+            id: generateId(),
             userId: currentUser?.id || '',
             title: 'New Note',
             createdAt: new Date().toISOString(),
@@ -68,14 +67,12 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     };
 
     const addBlock = (type: NoteBlockType, content?: string, position?: {x: number, y: number}) => {
-        // Use logic that depends on 'selectedNote' from render scope for immediate user interactions
         if (!selectedNote) return;
         
-        // Default pos center of visible area if not provided
         const defaultPos = position || { x: 100, y: 100 };
 
         const newBlock: NoteBlock = {
-            id: Date.now().toString(),
+            id: generateId(),
             type,
             content: content || '',
             position: defaultPos,
@@ -89,7 +86,7 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
             blocks: [...selectedNote.blocks, newBlock],
             updatedAt: new Date().toISOString()
         });
-        setActiveTool('select'); // Switch back to select after adding
+        setActiveTool('select');
     };
 
     const updateBlock = (blockId: string, updates: Partial<NoteBlock>) => {
@@ -107,6 +104,13 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
+            
+            // WINDOWS SAFEGUARD: Check size to prevent LocalStorage crash
+            if (file.size > 300 * 1024) { // 300KB limit
+                alert("⚠️ Image too large for local storage.\nPlease upload an image smaller than 300KB to ensure browser stability.");
+                return;
+            }
+
             const reader = new FileReader();
             reader.onload = (evt) => {
                 const content = evt.target?.result as string;
@@ -128,7 +132,6 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
             setIsDrawing(true);
             setCurrentPath(`M ${x} ${y}`);
         } else if (activeTool !== 'select') {
-            // Add shape at click
             if (activeTool === 'text') addBlock('text', '', {x, y});
             else if (activeTool === 'rectangle') addBlock('rectangle', '', {x, y});
             else if (activeTool === 'circle') addBlock('circle', '', {x, y});
@@ -158,7 +161,7 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
         if (isDrawing) {
             setIsDrawing(false);
             if (currentPath.length > 10) {
-                addBlock('drawing', currentPath, {x: 0, y: 0}); // Drawing path coords are absolute to canvas
+                addBlock('drawing', currentPath, {x: 0, y: 0});
             }
             setCurrentPath('');
         }
@@ -167,10 +170,9 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
 
     const startDrag = (e: React.MouseEvent, block: NoteBlock) => {
         if (activeTool !== 'select') return;
-        e.stopPropagation(); // Prevent canvas click
+        e.stopPropagation(); 
         setDraggingBlockId(block.id);
         
-        // Calculate offset
         if (canvasRef.current) {
             const rect = canvasRef.current.getBoundingClientRect();
             const mouseX = e.clientX - rect.left + canvasRef.current.scrollLeft;
@@ -185,9 +187,7 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     // --- AI Summary ---
 
     const handleGenerateSummary = async () => {
-        // Capture ID to find note later
         const noteId = selectedNoteId;
-        // Use current note for prompt generation
         const noteForPrompt = notesRef.current.find(n => n.id === noteId);
         
         if (!noteForPrompt) return;
@@ -195,12 +195,11 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
         try {
             const summary = await generateNoteSummary(noteForPrompt, includeImagesInSummary, llmConfig);
             
-            // Re-fetch the latest state of the note using ref to avoid stale closures if user edited during generation
             const freshNote = notesRef.current.find(n => n.id === noteId);
             if (freshNote) {
                 const maxY = freshNote.blocks.reduce((max, b) => Math.max(max, b.position.y + 100), 0);
                 const newBlock: NoteBlock = {
-                    id: Date.now().toString(),
+                    id: generateId(),
                     type: 'text',
                     content: `\n**AI SUMMARY:**\n${summary}`,
                     position: { x: 50, y: maxY + 50 },
@@ -339,6 +338,7 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
                         <div 
                             ref={canvasRef}
                             className={`flex-1 relative overflow-auto bg-slate-50 dark:bg-slate-950 bg-grid-slate-200 dark:bg-grid-slate-800 [background-size:20px_20px] ${activeTool === 'pen' ? 'cursor-crosshair' : activeTool !== 'select' ? 'cursor-copy' : 'cursor-default'}`}
+                            style={{ touchAction: 'none' }} 
                             onMouseDown={handleMouseDown}
                             onMouseMove={handleMouseMove}
                             onMouseUp={handleMouseUp}

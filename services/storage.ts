@@ -1,7 +1,7 @@
 
 import { User, Team, Meeting, UserRole, TaskStatus, TaskPriority, ProjectStatus, ProjectRole, ActionItemStatus, AppState, LLMConfig, WeeklyReport, Note } from '../types';
 
-const STORAGE_KEY = 'teamsync_data_v14'; // Version incremented for prompts
+const STORAGE_KEY = 'teamsync_data_v15'; // Version bumped for robustness
 
 const DEFAULT_LLM_CONFIG: LLMConfig = {
     provider: 'ollama',
@@ -9,7 +9,7 @@ const DEFAULT_LLM_CONFIG: LLMConfig = {
     model: 'llama3'
 };
 
-// --- INITIAL MINIMAL DATA (Production Start) ---
+// --- INITIAL MINIMAL DATA ---
 const INITIAL_ADMIN: User = { 
     id: 'u1', 
     uid: 'Admin', 
@@ -18,7 +18,20 @@ const INITIAL_ADMIN: User = {
     functionTitle: 'System Administrator', 
     role: UserRole.ADMIN, 
     managerId: null, 
-    password: '59565956' // Keep default pass for access
+    password: '59565956' 
+};
+
+// --- ROBUST ID GENERATOR (Windows/Offline safe) ---
+export const generateId = (): string => {
+    // Try native crypto if available (Secure Context)
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    // Fallback for older browsers or non-secure contexts (file://)
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
 };
 
 export const loadState = (): AppState => {
@@ -27,11 +40,7 @@ export const loadState = (): AppState => {
     if (stored) {
       const parsed = JSON.parse(stored);
       
-      // Ensure we don't have invalid LLM config
-      if (!parsed.llmConfig) {
-          parsed.llmConfig = DEFAULT_LLM_CONFIG;
-      }
-      
+      if (!parsed.llmConfig) parsed.llmConfig = DEFAULT_LLM_CONFIG;
       if (!parsed.weeklyReports) parsed.weeklyReports = [];
       if (!parsed.notes) parsed.notes = []; 
       if (!parsed.prompts) parsed.prompts = {};
@@ -39,26 +48,18 @@ export const loadState = (): AppState => {
       // User Migration
       if (parsed.users) {
           parsed.users = parsed.users.map((u: User) => {
-              // Force Update Admin if old version
               if (u.uid === 'Admin' || u.uid === 'ADM001') {
                   return { ...u, firstName: 'Mathieu', uid: 'Admin', password: '59565956', role: UserRole.ADMIN };
               }
-              return {
-                  ...u,
-                  password: u.password || '1234'
-              }
+              return { ...u, password: u.password || '1234' }
           });
       }
-
       return parsed;
     }
   } catch (error) {
-    console.error("Failed to load state from localStorage. Reseting to default.", error);
-    // Optionnel : Clear storage si corrompu pour éviter une boucle, ou laisser l'utilisateur écraser
-    // localStorage.removeItem(STORAGE_KEY);
+    console.error("Failed to load state. Reseting to default.", error);
   }
   
-  // RETURN BLANK STATE (Except Admin)
   return {
     users: [INITIAL_ADMIN],
     teams: [],
@@ -74,9 +75,15 @@ export const loadState = (): AppState => {
 
 export const saveState = (state: AppState) => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error("Failed to save state", e);
+    const serialized = JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY, serialized);
+  } catch (e: any) {
+    // Windows LocalStorage Quota Management
+    if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
+        alert("⚠️ CRITICAL STORAGE ERROR\n\nWindows LocalStorage is full (Limit: ~5-10MB).\n\nAction required:\n1. Delete old Notes containing images.\n2. Export your data in Settings > Backup.\n3. Clear data and re-import only necessary items.");
+    } else {
+        console.error("Failed to save state", e);
+    }
   }
 };
 

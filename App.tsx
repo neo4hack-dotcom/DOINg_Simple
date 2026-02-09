@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, ErrorInfo, ReactNode, Component } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
 import ProjectTracker from './components/ProjectTracker';
@@ -15,9 +15,82 @@ import NotesManager from './components/NotesManager';
 
 import { loadState, saveState } from './services/storage';
 import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
-import { Search, Bell, Sun, Moon, Bot } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw } from 'lucide-react';
 
-const App: React.FC = () => {
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+// --- Error Boundary for Robustness ---
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null
+  };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  handleReload = () => {
+      window.location.reload();
+  }
+
+  handleReset = () => {
+      if(window.confirm("This will reset local data to fix the crash. Continue?")) {
+          localStorage.clear();
+          window.location.reload();
+      }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+          <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-red-100 dark:border-red-900/30 p-8 text-center">
+            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Application Error</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              Something went wrong in the application. This might be due to a data conflict or a temporary glitch.
+            </p>
+            <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono text-left overflow-auto max-h-32 mb-6 text-red-800 dark:text-red-300">
+                {this.state.error?.toString()}
+            </div>
+            <div className="flex gap-3 justify-center">
+                <button 
+                    onClick={this.handleReload}
+                    className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors"
+                >
+                    <RefreshCw className="w-4 h-4 mr-2" /> Reload App
+                </button>
+                <button 
+                    onClick={this.handleReset}
+                    className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-md text-sm font-medium transition-colors"
+                >
+                    Reset Data
+                </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [appState, setAppState] = useState<AppState | null>(null);
   const [reportNotification, setReportNotification] = useState(false);
@@ -269,7 +342,7 @@ const App: React.FC = () => {
   };
 
 
-  if (!appState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500">Loading...</div>;
+  if (!appState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500">Loading Workspace...</div>;
 
   // Not Logged In
   if (!appState.currentUser) {
@@ -432,6 +505,14 @@ const App: React.FC = () => {
       </main>
     </div>
   );
+};
+
+const App: React.FC = () => {
+    return (
+        <ErrorBoundary>
+            <AppContent />
+        </ErrorBoundary>
+    );
 };
 
 export default App;

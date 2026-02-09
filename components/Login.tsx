@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { User } from '../types';
-import { LogIn, Lock, User as UserIcon } from 'lucide-react';
+import { Lock, User as UserIcon, ArrowRight } from 'lucide-react';
 
 interface LoginProps {
   users: User[];
@@ -14,72 +15,102 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find(u => u.uid.toLowerCase() === uid.toLowerCase());
+    setError('');
+    
+    // Simple case-insensitive match for UID
+    const user = users.find(u => u.uid.toLowerCase() === uid.trim().toLowerCase());
     
     if (user && user.password === password) {
       onLogin(user);
     } else {
-      setError('Incorrect User ID or Password.');
+      setError('Identifiants incorrects.');
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex items-center justify-center p-4">
-      <div className="max-w-sm w-full bg-white dark:bg-gray-900 rounded-lg shadow-md border border-gray-200 dark:border-gray-800 p-8">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center mb-4">
-              <span className="text-white font-bold text-2xl">D</span>
+    // "fallback-container" ensures layout works even if Tailwind fails loading
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex items-center justify-center p-4 fallback-container">
+      
+      {/* "fallback-card" ensures white box with shadow */}
+      <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 p-10 fallback-card">
+        
+        {/* Header */}
+        <div className="flex flex-col items-center mb-10">
+          <div className="w-14 h-14 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-indigo-200 dark:shadow-none shadow-lg">
+              <span className="text-white font-bold text-3xl tracking-tighter">D</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">DOINg</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Workspace</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">DOINg</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">Reporting Management System</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-5">
+        <form onSubmit={handleLogin} className="space-y-6">
+          
+          {/* User Input */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">User ID</label>
+            <label htmlFor="uid" className="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5 ml-1">
+              Identifiant (UID)
+            </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <UserIcon className="h-4 w-4 text-gray-400" />
+                <UserIcon className="h-5 w-5 text-gray-400" />
               </div>
               <input 
+                id="uid"
+                name="username"
                 type="text" 
+                autoComplete="username"
                 value={uid}
                 onChange={e => setUid(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md leading-5 bg-white dark:bg-gray-800 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900 dark:text-white transition duration-150 ease-in-out"
+                className="fallback-input block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-700 rounded-lg leading-5 bg-gray-50 dark:bg-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white dark:focus:bg-gray-900 transition-all text-gray-900 dark:text-white"
                 placeholder="Ex: ADM001"
+                required
               />
             </div>
           </div>
 
+          {/* Password Input */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Password</label>
+            <label htmlFor="password" className="block text-xs font-bold uppercase text-gray-500 dark:text-gray-400 mb-1.5 ml-1">
+              Mot de passe
+            </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Lock className="h-4 w-4 text-gray-400" />
+                <Lock className="h-5 w-5 text-gray-400" />
               </div>
               <input 
+                id="password"
+                name="password"
                 type="password" 
+                autoComplete="current-password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md leading-5 bg-white dark:bg-gray-800 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900 dark:text-white transition duration-150 ease-in-out"
+                className="fallback-input block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-700 rounded-lg leading-5 bg-gray-50 dark:bg-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white dark:focus:bg-gray-900 transition-all text-gray-900 dark:text-white"
                 placeholder="••••••••"
+                required
               />
             </div>
           </div>
 
+          {/* Error Message */}
           {error && (
-            <div className="p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs rounded border border-red-100 dark:border-red-900">
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg border border-red-100 dark:border-red-900 flex items-center justify-center animate-in fade-in slide-in-from-top-1">
               {error}
             </div>
           )}
 
+          {/* Submit Button */}
           <button 
             type="submit"
-            className="w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+            className="fallback-btn group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md hover:shadow-lg"
           >
-            Login
+            Se connecter
+            <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
+        
+        <div className="mt-8 text-center">
+            <p className="text-xs text-gray-400">© 2024 Secure Workspace</p>
+        </div>
       </div>
     </div>
   );

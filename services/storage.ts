@@ -2,6 +2,10 @@
 import { User, Team, Meeting, UserRole, TaskStatus, TaskPriority, ProjectStatus, ProjectRole, ActionItemStatus, AppState, LLMConfig, WeeklyReport, Note } from '../types';
 
 const STORAGE_KEY = 'teamsync_data_v15'; // Version bumped for robustness
+const CHANNEL_NAME = 'teamsync_broadcast_channel';
+
+// Channel for cross-tab synchronization
+const syncChannel = new BroadcastChannel(CHANNEL_NAME);
 
 const DEFAULT_LLM_CONFIG: LLMConfig = {
     provider: 'ollama',
@@ -77,6 +81,10 @@ export const saveState = (state: AppState) => {
   try {
     const serialized = JSON.stringify(state);
     localStorage.setItem(STORAGE_KEY, serialized);
+    
+    // Notify other tabs/windows about the update
+    syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
+    
   } catch (e: any) {
     // Windows LocalStorage Quota Management
     if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
@@ -87,7 +95,34 @@ export const saveState = (state: AppState) => {
   }
 };
 
+// Subscribe to external updates (Multi-tab support)
+export const subscribeToStoreUpdates = (callback: () => void) => {
+    // 1. Listen to BroadcastChannel (Modern browsers)
+    const channelHandler = (event: MessageEvent) => {
+        if (event.data.type === 'STATE_UPDATED') {
+            callback();
+        }
+    };
+    syncChannel.addEventListener('message', channelHandler);
+
+    // 2. Listen to StorageEvent (Fallback and different storage contexts)
+    const storageHandler = (event: StorageEvent) => {
+        if (event.key === STORAGE_KEY) {
+            callback();
+        }
+    };
+    window.addEventListener('storage', storageHandler);
+
+    // Unsubscribe function
+    return () => {
+        syncChannel.removeEventListener('message', channelHandler);
+        window.removeEventListener('storage', storageHandler);
+    };
+};
+
 export const clearState = () => {
     localStorage.removeItem(STORAGE_KEY);
+    // Notify others to clear/reload
+    syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
     window.location.reload();
 }

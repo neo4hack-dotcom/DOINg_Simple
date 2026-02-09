@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
@@ -12,9 +13,9 @@ import Login from './components/Login';
 import AIChatSidebar from './components/AIChatSidebar';
 import NotesManager from './components/NotesManager'; 
 
-import { loadState, saveState } from './services/storage';
+import { loadState, saveState, subscribeToStoreUpdates } from './services/storage';
 import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
-import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw, Radio } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -94,23 +95,49 @@ const AppContent: React.FC = () => {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [reportNotification, setReportNotification] = useState(false);
   
+  // External sync notification
+  const [showSyncToast, setShowSyncToast] = useState(false);
+
   // AI Sidebar State
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
 
   useEffect(() => {
-    // Load initial data
+    // 1. Load initial data
     const data = loadState();
     setAppState(data);
+    
     // Apply theme
     if (data.theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
+
+    // 2. Subscribe to Multi-Tab / Multi-Window Updates
+    const unsubscribe = subscribeToStoreUpdates(() => {
+        console.log("External update detected, reloading state...");
+        const freshState = loadState();
+        setAppState(freshState);
+        
+        // Show brief notification
+        setShowSyncToast(true);
+        setTimeout(() => setShowSyncToast(false), 3000);
+        
+        // Re-apply theme if changed remotely
+        if (freshState.theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    });
+
+    return () => {
+        unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
-    // Save on change
+    // Save on change (Only if user initiated change locally)
     if (appState) {
       saveState(appState);
     }
@@ -445,6 +472,14 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-200">
       
+      {/* Toast Notification for External Updates */}
+      {showSyncToast && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] bg-indigo-600 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-300">
+              <Radio className="w-4 h-4 animate-pulse" />
+              <span className="text-sm font-bold">Data synchronized from another window</span>
+          </div>
+      )}
+
       {/* AI Sidebar */}
       <AIChatSidebar 
         isOpen={isAiSidebarOpen} 

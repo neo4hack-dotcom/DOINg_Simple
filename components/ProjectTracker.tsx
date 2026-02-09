@@ -1,12 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency } from '../types';
 import { generateTeamReport } from '../services/llmService';
 import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -24,6 +24,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
   
+  // Selection State for AI Report
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
   // Modals state
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingTask, setEditingTask] = useState<{ projectId: string, task: Task } | null>(null);
@@ -40,6 +43,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   const currentTeam = teams.find(t => t.id === selectedTeamId);
   const teamManager = users.find(u => u.id === currentTeam?.managerId);
+
+  // Reset selection when team changes
+  useEffect(() => {
+      setSelectedProjectIds([]);
+      setAiReport(null);
+  }, [selectedTeamId]);
 
   // --- Helper Functions ---
 
@@ -74,12 +83,41 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       }
   };
 
+  const toggleProjectSelection = (projectId: string) => {
+      setSelectedProjectIds(prev => 
+          prev.includes(projectId) 
+              ? prev.filter(id => id !== projectId) 
+              : [...prev, projectId]
+      );
+  };
+
+  const toggleSelectAll = () => {
+      if (!currentTeam) return;
+      if (selectedProjectIds.length === currentTeam.projects.length) {
+          setSelectedProjectIds([]);
+      } else {
+          setSelectedProjectIds(currentTeam.projects.map(p => p.id));
+      }
+  };
+
   const handleGenerateReport = async () => {
     if (!currentTeam) return;
     setLoadingAi(true);
     setAiReport(null);
+    
+    // Filter projects if specific ones are selected, otherwise use all
+    const projectsToAnalyze = selectedProjectIds.length > 0 
+        ? currentTeam.projects.filter(p => selectedProjectIds.includes(p.id)) 
+        : currentTeam.projects;
+
+    // Create a temporary team object with only the relevant projects for the AI
+    const scopedTeam = {
+        ...currentTeam,
+        projects: projectsToAnalyze
+    };
+
     // Pass prompts prop
-    const report = await generateTeamReport(currentTeam, teamManager, llmConfig, prompts);
+    const report = await generateTeamReport(scopedTeam, teamManager, llmConfig, prompts);
     setAiReport(report);
     setLoadingAi(false);
   };
@@ -133,6 +171,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           team.projects = team.projects.filter(p => p.id !== projectId);
       });
       if(expandedProjectId === projectId) setExpandedProjectId(null);
+      // Remove from selection if deleted
+      setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
   };
 
   const handleAddTask = (projectId: string) => {
@@ -321,6 +361,10 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   if (!currentTeam) return <div className="p-8 text-center text-slate-500">Please select a team.</div>;
 
+  // Helper for Task Modal: Determine if assignee is a known user or custom string
+  const isKnownUser = (id?: string) => users.some(u => u.id === id);
+  const isCustomAssignee = editingTask?.task.assigneeId && !isKnownUser(editingTask.task.assigneeId);
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
@@ -456,6 +500,22 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                               <input type="number" value={editingTask.task.order || 0} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, order: parseInt(e.target.value)}})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
                           </div>
                       </div>
+
+                      <div className="">
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase">Description</label>
+                            <span className="text-[10px] text-slate-400 font-mono">{(editingTask.task.description || '').length}/3000</span>
+                          </div>
+                          <textarea 
+                              value={editingTask.task.description || ''} 
+                              onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, description: e.target.value}})} 
+                              maxLength={3000}
+                              rows={4}
+                              placeholder="Add detailed task description..."
+                              className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm resize-y" 
+                          />
+                      </div>
+
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
@@ -477,10 +537,33 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Assignee</label>
-                            <select value={editingTask.task.assigneeId || ''} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white">
-                                <option value="">Unassigned</option>
-                                {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-                            </select>
+                            <div className="space-y-2">
+                                <select 
+                                    value={isCustomAssignee ? 'CUSTOM_ASSIGNEE' : (editingTask.task.assigneeId || '')} 
+                                    onChange={e => {
+                                        if (e.target.value === 'CUSTOM_ASSIGNEE') {
+                                            setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: 'External Contact'}});
+                                        } else {
+                                            setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}});
+                                        }
+                                    }} 
+                                    className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                                >
+                                    <option value="">Unassigned</option>
+                                    {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                                    <option value="CUSTOM_ASSIGNEE">-- Other / External --</option>
+                                </select>
+                                {isCustomAssignee && (
+                                    <input 
+                                        type="text"
+                                        value={editingTask.task.assigneeId}
+                                        onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}})}
+                                        placeholder="Enter external name..."
+                                        className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm bg-indigo-50 dark:bg-indigo-900/20"
+                                        autoFocus
+                                    />
+                                )}
+                            </div>
                           </div>
                       </div>
 
@@ -623,7 +706,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                 className="flex items-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white rounded-lg shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
             >
                 {loadingAi ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"/> : <Bot className="w-4 h-4 mr-2" />}
-                {loadingAi ? 'Analyzing...' : `AI Report`}
+                {loadingAi ? 'Analyzing...' : (selectedProjectIds.length > 0 ? `AI Report (${selectedProjectIds.length})` : `AI Report (All)`)}
             </button>
         </div>
       </div>
@@ -637,7 +720,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
             <div className="flex justify-between items-start mb-4 relative z-10">
                 <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-300 flex items-center">
                     <Bot className="w-5 h-5 mr-2" />
-                    Executive Summary
+                    Executive Summary {selectedProjectIds.length > 0 ? `(Selected Projects)` : ''}
                 </h3>
                 <div className="flex gap-2">
                     <button 
@@ -665,6 +748,29 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
         </div>
       )}
 
+      {/* Bulk Selection Header */}
+      <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/50 p-2 px-4 rounded-xl border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center gap-2">
+              <button 
+                onClick={toggleSelectAll}
+                className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-2"
+              >
+                  {selectedProjectIds.length > 0 && selectedProjectIds.length === currentTeam.projects.length ? (
+                      <CheckSquare className="w-4 h-4" />
+                  ) : (
+                      <Square className="w-4 h-4" />
+                  )}
+                  {selectedProjectIds.length > 0 ? 'Deselect All' : 'Select All Projects'}
+              </button>
+              {selectedProjectIds.length > 0 && (
+                  <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">
+                      {selectedProjectIds.length} selected
+                  </span>
+              )}
+          </div>
+          <span className="text-[10px] text-slate-400">Select projects to scope AI Report generation.</span>
+      </div>
+
       {/* Projects Grid */}
       <div className="space-y-6">
         {currentTeam.projects.map(project => {
@@ -675,13 +781,24 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
             const sortedTasks = [...project.tasks].sort((a, b) => (a.order || 0) - (b.order || 0));
             const hasContext = project.additionalDescriptions && project.additionalDescriptions.some(d => d.trim().length > 0);
             const isContextVisible = showContextForProject === project.id;
+            const isSelected = selectedProjectIds.includes(project.id);
 
             return (
               <div key={project.id} className={`bg-white dark:bg-slate-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${isExpanded ? 'border-indigo-200 dark:border-indigo-500/30 ring-1 ring-indigo-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}>
                 
                 {/* Project Card Header */}
-                <div className="p-6">
+                <div className={`p-6 ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
                     <div className="flex flex-col md:flex-row gap-6 md:items-center">
+                        {/* Checkbox for Selection */}
+                        <div className="flex items-center">
+                            <input 
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleProjectSelection(project.id)}
+                                className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                        </div>
+
                         <div 
                             className="flex-1 cursor-pointer"
                             onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
@@ -834,6 +951,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                     {sortedTasks.map(task => {
                                         const checklistDone = task.checklist ? task.checklist.filter(i => i.done).length : 0;
                                         const checklistTotal = task.checklist ? task.checklist.length : 0;
+                                        const assigneeUser = users.find(u => u.id === task.assigneeId);
+                                        const isExternalAssignee = task.assigneeId && !assigneeUser;
+
                                         return (
                                         <tr key={task.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group ${task.isImportant ? 'bg-red-50/30 dark:bg-red-900/10' : ''}`}>
                                             <td className="px-6 py-4 text-center font-mono text-slate-400 text-xs">
@@ -845,7 +965,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                     {task.isImportant && <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />}
                                                     <div className="font-medium text-slate-900 dark:text-white">{task.title}</div>
                                                 </div>
-                                                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{task.description}</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{task.description}</div>
                                                 
                                                 {/* Task Dependencies Display */}
                                                 {task.externalDependencies && task.externalDependencies.length > 0 && (
@@ -896,13 +1016,22 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
-                                                    {task.assigneeId ? (
+                                                    {assigneeUser ? (
                                                         <>
                                                             <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300">
-                                                                {users.find(u => u.id === task.assigneeId)?.firstName[0]}
+                                                                {assigneeUser.firstName[0]}
                                                             </div>
                                                             <span className="text-slate-700 dark:text-slate-300 truncate max-w-[100px]">
-                                                                {users.find(u => u.id === task.assigneeId)?.firstName}
+                                                                {assigneeUser.firstName}
+                                                            </span>
+                                                        </>
+                                                    ) : isExternalAssignee ? (
+                                                        <>
+                                                            <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                                                                <UserPlus className="w-3 h-3" />
+                                                            </div>
+                                                            <span className="text-indigo-600 dark:text-indigo-300 truncate max-w-[100px] text-xs font-medium">
+                                                                {task.assigneeId}
                                                             </span>
                                                         </>
                                                     ) : (

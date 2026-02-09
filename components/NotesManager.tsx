@@ -5,7 +5,7 @@ import { generateNoteSummary } from '../services/llmService';
 import { generateId } from '../services/storage'; // Use new robust ID
 import { 
     Plus, Archive, Trash2, Search, FileText, Image as ImageIcon, 
-    Square, Circle, Minus, Type, X, Bot, Loader2, Calendar, MousePointer2, Pen
+    X, Bot, Loader2, Calendar, MousePointer2, Type
 } from 'lucide-react';
 
 interface NotesManagerProps {
@@ -26,13 +26,8 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     const [includeImagesInSummary, setIncludeImagesInSummary] = useState(false);
 
     // Canvas Interaction State
-    const [activeTool, setActiveTool] = useState<NoteBlockType | 'select' | 'pen'>('select');
     const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-    
-    // Drawing State
-    const [isDrawing, setIsDrawing] = useState(false);
-    const [currentPath, setCurrentPath] = useState('');
     
     // Refs
     const notesRef = useRef(notes); 
@@ -66,27 +61,22 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
         onUpdateNote({ ...selectedNote, title, updatedAt: new Date().toISOString() });
     };
 
-    const addBlock = (type: NoteBlockType, content?: string, position?: {x: number, y: number}) => {
+    const addBlock = (type: 'text' | 'image', content?: string, position?: {x: number, y: number}) => {
         if (!selectedNote) return;
         
-        const defaultPos = position || { x: 100, y: 100 };
+        const defaultPos = position || { x: 50, y: 50 };
 
         const newBlock: NoteBlock = {
             id: generateId(),
             type,
             content: content || '',
             position: defaultPos,
-            style: type === 'rectangle' ? { width: '150px', height: '100px', color: '#6366f1' } :
-                   type === 'circle' ? { width: '100px', height: '100px', color: '#ec4899' } :
-                   type === 'line' ? { width: '200px', height: '4px', color: '#94a3b8' } :
-                   type === 'drawing' ? { color: '#000000', width: '2' } : undefined
         };
         onUpdateNote({
             ...selectedNote,
             blocks: [...selectedNote.blocks, newBlock],
             updatedAt: new Date().toISOString()
         });
-        setActiveTool('select');
     };
 
     const updateBlock = (blockId: string, updates: Partial<NoteBlock>) => {
@@ -118,25 +108,15 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
             };
             reader.readAsDataURL(file);
         }
+        // Reset
+        e.target.value = '';
     };
 
-    // --- Mouse Handling (Drag & Draw) ---
+    // --- Mouse Handling (Drag) ---
 
     const handleMouseDown = (e: React.MouseEvent) => {
         if (!canvasRef.current) return;
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left + canvasRef.current.scrollLeft;
-        const y = e.clientY - rect.top + canvasRef.current.scrollTop;
-
-        if (activeTool === 'pen') {
-            setIsDrawing(true);
-            setCurrentPath(`M ${x} ${y}`);
-        } else if (activeTool !== 'select') {
-            if (activeTool === 'text') addBlock('text', '', {x, y});
-            else if (activeTool === 'rectangle') addBlock('rectangle', '', {x, y});
-            else if (activeTool === 'circle') addBlock('circle', '', {x, y});
-            else if (activeTool === 'line') addBlock('line', '', {x, y});
-        }
+        // Logic specific to canvas background click (e.g. deselect) could go here
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
@@ -145,9 +125,7 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
         const x = e.clientX - rect.left + canvasRef.current.scrollLeft;
         const y = e.clientY - rect.top + canvasRef.current.scrollTop;
 
-        if (isDrawing) {
-            setCurrentPath(prev => `${prev} L ${x} ${y}`);
-        } else if (draggingBlockId && activeTool === 'select') {
+        if (draggingBlockId) {
             updateBlock(draggingBlockId, {
                 position: {
                     x: x - dragOffset.x,
@@ -158,18 +136,10 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
     };
 
     const handleMouseUp = () => {
-        if (isDrawing) {
-            setIsDrawing(false);
-            if (currentPath.length > 10) {
-                addBlock('drawing', currentPath, {x: 0, y: 0});
-            }
-            setCurrentPath('');
-        }
         setDraggingBlockId(null);
     };
 
     const startDrag = (e: React.MouseEvent, block: NoteBlock) => {
-        if (activeTool !== 'select') return;
         e.stopPropagation(); 
         setDraggingBlockId(block.id);
         
@@ -292,6 +262,20 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
                                 />
                                 <div className="text-xs text-slate-400 mt-1">Created: {new Date(selectedNote.createdAt).toLocaleDateString()}</div>
                             </div>
+                            
+                            {/* Toolbar Simplifiée */}
+                            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                                <button onClick={() => addBlock('text')} className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-md text-slate-600 dark:text-slate-300 shadow-sm" title="Add Text">
+                                    <Type className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-md text-slate-600 dark:text-slate-300 shadow-sm" title="Add Image">
+                                    <ImageIcon className="w-4 h-4" />
+                                </button>
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                            </div>
+
+                            <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-4"></div>
+
                             <div className="flex items-center gap-2">
                                 <button 
                                     onClick={() => onUpdateNote({ ...selectedNote, isArchived: !selectedNote.isArchived })}
@@ -337,20 +321,13 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
                         {/* CANVAS AREA */}
                         <div 
                             ref={canvasRef}
-                            className={`flex-1 relative overflow-auto bg-slate-50 dark:bg-slate-950 bg-grid-slate-200 dark:bg-grid-slate-800 [background-size:20px_20px] ${activeTool === 'pen' ? 'cursor-crosshair' : activeTool !== 'select' ? 'cursor-copy' : 'cursor-default'}`}
+                            className="flex-1 relative overflow-auto bg-slate-50 dark:bg-slate-950 bg-grid-slate-200 dark:bg-grid-slate-800 [background-size:20px_20px]"
                             style={{ touchAction: 'none' }} 
                             onMouseDown={handleMouseDown}
                             onMouseMove={handleMouseMove}
                             onMouseUp={handleMouseUp}
                             onMouseLeave={handleMouseUp}
                         >
-                            {/* Drawing Layer (Top SVG) */}
-                            {isDrawing && (
-                                <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{zIndex: 50}}>
-                                    <path d={currentPath} stroke="black" strokeWidth="2" fill="none" className="dark:stroke-white" />
-                                </svg>
-                            )}
-
                             {selectedNote.blocks.map((block) => (
                                 <div 
                                     key={block.id} 
@@ -358,24 +335,22 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
                                     style={{ 
                                         left: block.position.x, 
                                         top: block.position.y,
-                                        zIndex: block.type === 'drawing' ? 0 : 10 // Drawings at back, items at front
+                                        zIndex: 10
                                     }}
                                     onMouseDown={(e) => startDrag(e, block)}
                                 >
-                                    {/* Handle for selecting/moving clearly */}
-                                    <div className={`absolute -top-3 -left-3 p-1 rounded-full bg-indigo-500 cursor-move opacity-0 group-hover:opacity-100 transition-opacity z-20 ${activeTool === 'select' ? '' : 'hidden'}`}></div>
+                                    {/* Drag Handle */}
+                                    <div className="absolute -top-3 -left-3 p-1 rounded-full bg-indigo-500 cursor-move opacity-0 group-hover:opacity-100 transition-opacity z-20"></div>
 
                                     {/* Delete Block Button */}
-                                    {activeTool === 'select' && (
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); removeBlock(block.id); }}
-                                            className="absolute -top-4 -right-4 p-1 bg-white dark:bg-slate-800 shadow-sm border border-red-200 rounded-full text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity z-20"
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </button>
-                                    )}
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); removeBlock(block.id); }}
+                                        className="absolute -top-4 -right-4 p-1 bg-white dark:bg-slate-800 shadow-sm border border-red-200 rounded-full text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
 
-                                    {/* Render Block based on Type */}
+                                    {/* Text Block */}
                                     {block.type === 'text' && (
                                         <textarea
                                             value={block.content}
@@ -384,104 +359,20 @@ const NotesManager: React.FC<NotesManagerProps> = ({ notes, currentUser, llmConf
                                                 e.target.style.height = 'auto';
                                                 e.target.style.height = e.target.scrollHeight + 'px';
                                             }}
-                                            className={`bg-transparent border border-transparent hover:border-dashed hover:border-slate-300 rounded p-1 outline-none resize-none text-slate-800 dark:text-slate-200 text-sm leading-relaxed overflow-hidden min-w-[200px] ${activeTool === 'select' ? 'cursor-move' : ''}`}
+                                            className="bg-transparent border border-transparent hover:border-dashed hover:border-slate-300 rounded p-1 outline-none resize-none text-slate-800 dark:text-slate-200 text-sm leading-relaxed overflow-hidden min-w-[200px] cursor-move"
                                             placeholder="Type here..."
                                             rows={1}
                                             style={{ minHeight: '1.5em' }}
-                                            onClick={e => e.stopPropagation()} // Allow text edit
+                                            onMouseDown={(e) => { e.stopPropagation(); /* allow focus */ }} 
                                         />
                                     )}
 
+                                    {/* Image Block */}
                                     {block.type === 'image' && (
                                         <img src={block.content} alt="Note content" className="max-w-[300px] rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 pointer-events-none" />
                                     )}
-
-                                    {block.type === 'rectangle' && (
-                                        <div 
-                                            style={{ 
-                                                width: block.style?.width, 
-                                                height: block.style?.height, 
-                                                borderColor: block.style?.color,
-                                                backgroundColor: `${block.style?.color}20`,
-                                                borderWidth: '4px',
-                                                borderStyle: 'solid'
-                                            }} 
-                                        />
-                                    )}
-
-                                    {block.type === 'circle' && (
-                                        <div 
-                                            style={{ 
-                                                width: block.style?.width, 
-                                                height: block.style?.height, 
-                                                borderColor: block.style?.color,
-                                                backgroundColor: `${block.style?.color}20`,
-                                                borderWidth: '4px',
-                                                borderStyle: 'solid',
-                                                borderRadius: '50%'
-                                            }} 
-                                        />
-                                    )}
-
-                                    {block.type === 'line' && (
-                                        <div 
-                                            style={{ 
-                                                width: block.style?.width, 
-                                                height: block.style?.height, 
-                                                backgroundColor: block.style?.color 
-                                            }} 
-                                        />
-                                    )}
-
-                                    {block.type === 'drawing' && (
-                                        <svg style={{ overflow: 'visible' }}>
-                                            <path 
-                                                d={block.content} 
-                                                stroke={block.style?.color || 'black'} 
-                                                strokeWidth={block.style?.width || '2'} 
-                                                fill="none" 
-                                                className="dark:stroke-white"
-                                            />
-                                        </svg>
-                                    )}
                                 </div>
                             ))}
-                        </div>
-
-                        {/* Floating Toolbar */}
-                        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl rounded-full px-4 py-2 flex items-center gap-2 z-20">
-                            <button 
-                                onClick={() => setActiveTool('select')} 
-                                className={`p-2 rounded-full transition-colors ${activeTool === 'select' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} 
-                                title="Select / Move"
-                            >
-                                <MousePointer2 className="w-5 h-5" />
-                            </button>
-                            <button 
-                                onClick={() => setActiveTool('pen')} 
-                                className={`p-2 rounded-full transition-colors ${activeTool === 'pen' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} 
-                                title="Pen"
-                            >
-                                <Pen className="w-5 h-5" />
-                            </button>
-                            <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-                            <button onClick={() => setActiveTool('text')} className={`p-2 rounded-full transition-colors ${activeTool === 'text' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} title="Text">
-                                <Type className="w-5 h-5" />
-                            </button>
-                            <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-600 dark:text-slate-300" title="Image">
-                                <ImageIcon className="w-5 h-5" />
-                            </button>
-                            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
-                            <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-                            <button onClick={() => setActiveTool('rectangle')} className={`p-2 rounded-full transition-colors ${activeTool === 'rectangle' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} title="Rectangle">
-                                <Square className="w-5 h-5" />
-                            </button>
-                            <button onClick={() => setActiveTool('circle')} className={`p-2 rounded-full transition-colors ${activeTool === 'circle' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} title="Circle">
-                                <Circle className="w-5 h-5" />
-                            </button>
-                            <button onClick={() => setActiveTool('line')} className={`p-2 rounded-full transition-colors ${activeTool === 'line' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900' : 'hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'}`} title="Line">
-                                <Minus className="w-5 h-5" />
-                            </button>
                         </div>
                     </>
                 ) : (

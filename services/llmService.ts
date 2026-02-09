@@ -62,6 +62,29 @@ Best regards,
 {{NAME}}
 Write in English.
 `,
+    weekly_autofill: `
+You are a manager consolidating the weekly reports of your team.
+
+SOURCE DATA:
+{{DATA}}
+
+TASK:
+Synthesize all these reports into a single consolidated report.
+You must extract the most important information and group it into the following 5 categories.
+
+CRITICAL: RETURN ONLY A VALID JSON OBJECT. NO MARKDOWN. NO CODE BLOCKS.
+
+Structure required:
+{
+  "mainSuccess": "Consolidated text of main achievements...",
+  "mainIssue": "Consolidated text of blocking issues...",
+  "incident": "Consolidated text of incidents...",
+  "orgaPoint": "Consolidated text of HR/Orga points...",
+  "otherSection": "Any other relevant info..."
+}
+
+Language: English.
+`,
     management_insight: `
 You are a high-end Management Consultant presenting to the Board of Directors.
 Analyze the following data to provide a strategic, beautiful, and structured overview.
@@ -120,16 +143,25 @@ const prepareTeamData = (team: Team, manager: User | undefined): string => {
 };
 
 const prepareMeetingData = (meeting: Meeting, teamName: string, attendeesNames: string[], users: User[]): string => {
+  // Helper to resolve name (User object or Raw String)
+  const resolveName = (idOrName: string) => {
+      const u = users.find(user => user.id === idOrName);
+      return u ? `${u.firstName} ${u.lastName}` : idOrName;
+  };
+
   const actionItemsText = meeting.actionItems.map(ai => {
-     const owner = users.find(u => u.id === ai.ownerId);
-     return `- ${ai.description} (Owner: ${owner?.firstName || 'N/A'}, Due: ${ai.dueDate})`;
+     const ownerName = resolveName(ai.ownerId);
+     return `- ${ai.description} (Owner: ${ownerName || 'N/A'}, Due: ${ai.dueDate})`;
   }).join('\n');
+
+  // Re-map attendees to ensure external names are captured correctly if passed as IDs or raw strings
+  const resolvedAttendees = meeting.attendees.map(resolveName);
 
   return `
     Title: ${meeting.title}
     Date: ${meeting.date}
     Team: ${teamName}
-    Attendees: ${attendeesNames.join(', ')}
+    Attendees: ${resolvedAttendees.join(', ')}
     
     Raw Notes (Minutes):
     ${meeting.minutes}
@@ -316,8 +348,8 @@ export const generateTeamReport = async (team: Team, manager: User | undefined, 
 
 export const generateMeetingSummary = async (meeting: Meeting, team: Team | undefined, users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
     const teamName = team ? team.name : 'General';
-    const attendeesNames = meeting.attendees.map(id => users.find(u => u.id === id)?.firstName || 'Unknown').filter(Boolean);
-    const data = prepareMeetingData(meeting, teamName, attendeesNames, users);
+    // Use the updated preparation logic that handles external names correctly
+    const data = prepareMeetingData(meeting, teamName, meeting.attendees, users);
     
     const template = customPrompts?.['meeting_summary'] || DEFAULT_PROMPTS.meeting_summary;
     const prompt = fillTemplate(template, { 
@@ -339,7 +371,7 @@ export const generateWeeklyReportSummary = async (report: WeeklyReport, user: Us
     return runPrompt(prompt, config);
 }
 
-export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], config: LLMConfig): Promise<Record<string, string>> => {
+export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<Record<string, string>> => {
     // 1. Prepare Data
     const reportsText = selectedReports.map(r => {
         const u = users.find(user => user.id === r.userId);
@@ -355,29 +387,8 @@ export const generateConsolidatedReport = async (selectedReports: WeeklyReport[]
         `;
     }).join('\n');
 
-    const prompt = `
-    You are a manager consolidating the weekly reports of your team.
-    
-    SOURCE DATA:
-    ${reportsText}
-
-    TASK:
-    Synthesize all these reports into a single consolidated report.
-    You must extract the most important information and group it into the following 5 categories.
-    
-    CRITICAL: RETURN ONLY A VALID JSON OBJECT. NO MARKDOWN. NO CODE BLOCKS.
-    
-    Structure required:
-    {
-      "mainSuccess": "Consolidated text of main achievements...",
-      "mainIssue": "Consolidated text of blocking issues...",
-      "incident": "Consolidated text of incidents...",
-      "orgaPoint": "Consolidated text of HR/Orga points...",
-      "otherSection": "Any other relevant info..."
-    }
-    
-    Language: English.
-    `;
+    const template = customPrompts?.['weekly_autofill'] || DEFAULT_PROMPTS.weekly_autofill;
+    const prompt = fillTemplate(template, { DATA: reportsText });
 
     const rawResponse = await runPrompt(prompt, config);
     

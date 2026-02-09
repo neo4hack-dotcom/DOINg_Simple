@@ -27,10 +27,13 @@ interface ErrorBoundaryState {
 
 // --- Error Boundary for Robustness ---
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: null
-  };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -440,6 +443,7 @@ const AppContent: React.FC = () => {
             onUpdateUser={handleUpdateUser} 
             onDeleteUser={handleDeleteUser}
             onAddTeam={handleAddTeam}
+            onUpdateTeam={handleUpdateTeam} 
             onDeleteTeam={handleDeleteTeam}
         />;
       case 'settings': 

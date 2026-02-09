@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { LLMConfig, ChatMessage, User } from '../types';
 import { sendChatMessage, generateDocumentSynthesis } from '../services/llmService';
 import FormattedText from './FormattedText';
-import { X, Send, Paperclip, Minimize2, Maximize2, Sparkles, FileText, Image as ImageIcon, Trash2, Bot, Download, Copy } from 'lucide-react';
+import { X, Send, Paperclip, Minimize2, Maximize2, Sparkles, FileText, Image as ImageIcon, Trash2, Bot, Download, Copy, Eraser } from 'lucide-react';
 
 interface AIChatSidebarProps {
   isOpen: boolean;
@@ -146,6 +146,12 @@ const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ isOpen, onClose, llmConfi
       element.click();
   }
 
+  const handleClearChat = () => {
+      if (window.confirm("Clear conversation history?")) {
+          setMessages([]);
+      }
+  }
+
   return (
     <>
         {/* Backdrop */}
@@ -178,6 +184,14 @@ const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ isOpen, onClose, llmConfi
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button 
+                        onClick={handleClearChat}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-red-500 transition-colors"
+                        title="Clear History"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                    <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
                     <button 
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg text-slate-500 transition-colors"

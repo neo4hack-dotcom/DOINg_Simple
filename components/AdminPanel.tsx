@@ -10,6 +10,7 @@ interface AdminPanelProps {
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
   onAddTeam: (team: Team) => void;
+  onUpdateTeam: (team: Team) => void;
   onDeleteTeam: (teamId: string) => void;
 }
 
@@ -66,7 +67,7 @@ const HierarchyNode: React.FC<{ user: User; allUsers: User[]; level?: number }> 
   );
 };
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpdateUser, onDeleteUser, onAddTeam, onDeleteTeam }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpdateUser, onDeleteUser, onAddTeam, onUpdateTeam, onDeleteTeam }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'teams'>('users');
   
   // User Management State
@@ -78,8 +79,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
     password: ''
   });
 
-  // New Team State
-  const [newTeam, setNewTeam] = useState<{name: string, managerId: string}>({
+  // Team Management State
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  const [teamForm, setTeamForm] = useState<{name: string, managerId: string}>({
       name: '',
       managerId: ''
   });
@@ -145,16 +147,47 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
       setUserForm({ role: UserRole.EMPLOYEE, managerId: '', location: '', password: '' });
   };
 
-  const handleCreateTeam = () => {
-      if (newTeam.name && newTeam.managerId) {
-          onAddTeam({
-              id: Date.now().toString(),
-              name: newTeam.name,
-              managerId: newTeam.managerId,
-              projects: []
-          });
-          setNewTeam({ name: '', managerId: '' });
+  // --- Team Logic ---
+
+  const handleSaveTeam = () => {
+      if (teamForm.name && teamForm.managerId) {
+          if (editingTeamId) {
+              // Edit existing
+              const existingTeam = teams.find(t => t.id === editingTeamId);
+              if (existingTeam) {
+                  onUpdateTeam({
+                      ...existingTeam,
+                      name: teamForm.name,
+                      managerId: teamForm.managerId
+                  });
+              }
+              setEditingTeamId(null);
+          } else {
+              // Create new
+              onAddTeam({
+                  id: Date.now().toString(),
+                  name: teamForm.name,
+                  managerId: teamForm.managerId,
+                  projects: []
+              });
+          }
+          setTeamForm({ name: '', managerId: '' });
       }
+  };
+
+  const handleEditTeamClick = (team: Team) => {
+      setEditingTeamId(team.id);
+      setTeamForm({
+          name: team.name,
+          managerId: team.managerId
+      });
+      // Scroll to top to see form
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelTeamEdit = () => {
+      setEditingTeamId(null);
+      setTeamForm({ name: '', managerId: '' });
   };
 
   const rootUsers = users.filter(u => !u.managerId);
@@ -337,13 +370,20 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
 
       {activeTab === 'teams' && (
           <div className="space-y-8 animate-in fade-in">
-              {/* Team Creation */}
-              <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-6 flex items-center">
-                    <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg mr-3">
-                        <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              {/* Team Creation / Edit */}
+              <div className={`bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors ${editingTeamId ? 'bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-800' : ''}`}>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-6 flex items-center justify-between">
+                    <div className="flex items-center">
+                        <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg mr-3">
+                            <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        {editingTeamId ? 'Edit Team' : 'Create New Team'}
                     </div>
-                    Create New Team
+                    {editingTeamId && (
+                        <button onClick={handleCancelTeamEdit} className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 flex items-center">
+                            <X className="w-4 h-4 mr-1" /> Cancel
+                        </button>
+                    )}
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                     <div>
@@ -351,16 +391,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
                         <input
                             className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
                             placeholder="Engineering Alpha"
-                            value={newTeam.name}
-                            onChange={e => setNewTeam({ ...newTeam, name: e.target.value })}
+                            value={teamForm.name}
+                            onChange={e => setTeamForm({ ...teamForm, name: e.target.value })}
                         />
                     </div>
                     <div>
                         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Team Manager</label>
                         <select
                             className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
-                            value={newTeam.managerId}
-                            onChange={e => setNewTeam({ ...newTeam, managerId: e.target.value })}
+                            value={teamForm.managerId}
+                            onChange={e => setTeamForm({ ...teamForm, managerId: e.target.value })}
                         >
                             <option value="">-- Select Manager --</option>
                             {potentialManagers.map(u => (
@@ -369,10 +409,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
                         </select>
                     </div>
                     <button
-                        onClick={handleCreateTeam}
+                        onClick={handleSaveTeam}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-lg font-medium transition-colors flex items-center justify-center shadow-md md:col-span-2 mt-2"
                     >
-                        <Plus className="w-4 h-4 mr-2" /> Create Team
+                        {editingTeamId ? <Save className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                        {editingTeamId ? 'Save Changes' : 'Create Team'}
                     </button>
                 </div>
               </div>
@@ -381,14 +422,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ users, teams, onAddUser, onUpda
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {teams.map(team => {
                       const manager = users.find(u => u.id === team.managerId);
+                      const isEditing = editingTeamId === team.id;
                       return (
-                          <div key={team.id} className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative group">
-                              <button 
-                                onClick={() => onDeleteTeam(team.id)}
-                                className="absolute top-4 right-4 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                  <Trash2 className="w-4 h-4" />
-                              </button>
+                          <div key={team.id} className={`bg-white dark:bg-slate-800 p-6 rounded-xl border shadow-sm relative group transition-all ${isEditing ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-200 dark:border-slate-700'}`}>
+                              <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={() => handleEditTeamClick(team)}
+                                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                                    title="Edit Team"
+                                  >
+                                      <Pencil className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => onDeleteTeam(team.id)}
+                                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                                    title="Delete Team"
+                                  >
+                                      <Trash2 className="w-4 h-4" />
+                                  </button>
+                              </div>
                               <div className="flex items-center gap-3 mb-4">
                                   <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
                                       <Briefcase className="w-5 h-5" />

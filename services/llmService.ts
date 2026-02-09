@@ -70,20 +70,46 @@ SOURCE DATA:
 
 TASK:
 Synthesize all these reports into a single consolidated report.
-You must extract the most important information and group it into the following 5 categories.
+For each category (Success, Issues, Incidents, Organization, Other), list the items as bullet points.
+IMPORTANT: You MUST preserve the context of the Team Name and the Project/Subject for each point.
+
+Format for each bullet point:
+- **[Team Name - User Name]** [Project/Context]: The specific achievement or issue.
 
 CRITICAL: RETURN ONLY A VALID JSON OBJECT. NO MARKDOWN. NO CODE BLOCKS.
 
 Structure required:
 {
-  "mainSuccess": "Consolidated text of main achievements...",
-  "mainIssue": "Consolidated text of blocking issues...",
-  "incident": "Consolidated text of incidents...",
-  "orgaPoint": "Consolidated text of HR/Orga points...",
-  "otherSection": "Any other relevant info..."
+  "mainSuccess": "Bullet list of achievements...",
+  "mainIssue": "Bullet list of blocking issues...",
+  "incident": "Bullet list of incidents...",
+  "orgaPoint": "Bullet list of HR/Orga points...",
+  "otherSection": "Bullet list of other relevant info..."
 }
 
 Language: English.
+`,
+    manager_synthesis: `
+You are a Senior Project Manager generating a high-level executive synthesis based on team reports.
+
+DATA TO ANALYZE (Consolidated Categories):
+{{DATA}}
+
+TASK:
+Generate a clear, structured summary organized by Project/Subject.
+Synthesize the information provided in the input categories.
+Cross-reference information if multiple people mention the same project.
+
+CONSTRAINTS:
+1. **NO Hallucinations**: Use ONLY the facts provided in the data. Do not invent details.
+2. **Tone**: Positive and constructive. Rephrase difficulties as challenges to be managed, unless it is a major critical incident.
+3. **Alerts**: Use **Bold** with "Warning" ONLY for key critical points/blockers.
+4. **Structure**:
+   - **Executive Overview**: 2-3 sentences.
+   - **Project/Topic Updates**: Group updates by project name. Use bullet points.
+   - **Team & HR**: Brief section for organizational points.
+
+Write in English.
 `,
     management_insight: `
 You are a high-end Management Consultant presenting to the Board of Directors.
@@ -371,12 +397,22 @@ export const generateWeeklyReportSummary = async (report: WeeklyReport, user: Us
     return runPrompt(prompt, config);
 }
 
-export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<Record<string, string>> => {
+export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], teams: Team[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<Record<string, string>> => {
     // 1. Prepare Data
     const reportsText = selectedReports.map(r => {
         const u = users.find(user => user.id === r.userId);
+        
+        // Find Team context for this user
+        // Logic: Is user manager of a team? Or member of a project in a team?
+        const userTeams = teams.filter(t => 
+            t.managerId === u?.id || 
+            t.projects.some(p => p.members.some(m => m.userId === u?.id))
+        );
+        const teamNames = userTeams.map(t => t.name).join(', ') || 'No Team';
+
         return `
         REPORT FROM: ${u?.firstName} ${u?.lastName}
+        TEAM(S): ${teamNames}
         TEAM HEALTH: ${r.teamHealth}, PROJECT HEALTH: ${r.projectHealth}
         SUCCESS: ${r.mainSuccess}
         ISSUES: ${r.mainIssue}
@@ -409,6 +445,30 @@ export const generateConsolidatedReport = async (selectedReports: WeeklyReport[]
         };
     }
 }
+
+export const generateManagerSynthesis = async (reportData: WeeklyReport, config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+    const data = `
+    SUCCESSES:
+    ${reportData.mainSuccess}
+    
+    ISSUES/BLOCKERS:
+    ${reportData.mainIssue}
+    
+    INCIDENTS:
+    ${reportData.incident}
+    
+    ORGANIZATION:
+    ${reportData.orgaPoint}
+    
+    OTHER:
+    ${reportData.otherSection}
+    `;
+
+    const template = customPrompts?.['manager_synthesis'] || DEFAULT_PROMPTS.manager_synthesis;
+    const prompt = fillTemplate(template, { DATA: data });
+
+    return runPrompt(prompt, config);
+};
 
 export const generateManagementInsight = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
     const data = prepareManagementData(teams, reports, users);

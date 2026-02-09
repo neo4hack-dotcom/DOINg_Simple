@@ -1,19 +1,20 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus } from '../types';
-import { generateWeeklyReportSummary, generateConsolidatedReport } from '../services/llmService';
+import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus, Team } from '../types';
+import { generateWeeklyReportSummary, generateConsolidatedReport, generateManagerSynthesis } from '../services/llmService';
 import FormattedText from './FormattedText';
-import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive } from 'lucide-react';
+import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive, FileText, Sparkles } from 'lucide-react';
 
 interface WeeklyReportProps {
   reports: WeeklyReportType[];
   users: User[];
   currentUser: User | null;
+  teams: Team[];
   llmConfig?: LLMConfig; 
   onSaveReport: (report: WeeklyReportType) => void;
 }
 
-const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser, llmConfig, onSaveReport }) => {
+const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser, teams, llmConfig, onSaveReport }) => {
   const [activeTab, setActiveTab] = useState<'my-report' | 'team-reports' | 'archives'>('my-report');
   
   // AI State
@@ -25,6 +26,11 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
   const [showAutoFillModal, setShowAutoFillModal] = useState(false);
   const [selectedReportIdsForFill, setSelectedReportIdsForFill] = useState<string[]>([]);
   const [isFilling, setIsFilling] = useState(false);
+
+  // Manager Synthesis State
+  const [showSynthesisModal, setShowSynthesisModal] = useState(false);
+  const [synthesisResult, setSynthesisResult] = useState('');
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
 
   // Helper to get current week's Monday
   const getMonday = (d: Date) => {
@@ -104,6 +110,21 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       setIsGenerating(false);
   }
 
+  const handleManagerSynthesis = async () => {
+      if (!llmConfig) return alert("AI Configuration missing");
+      // Basic validation: ensure there is content to synthesize
+      if (!currentReport.mainSuccess && !currentReport.mainIssue && !currentReport.incident && !currentReport.otherSection) {
+          return alert("Please fill or auto-fill the report sections before generating a synthesis.");
+      }
+      setIsSynthesizing(true);
+      setShowSynthesisModal(true);
+      setSynthesisResult('');
+
+      const result = await generateManagerSynthesis(currentReport, llmConfig);
+      setSynthesisResult(result);
+      setIsSynthesizing(false);
+  }
+
   const handleLoadReport = (report: WeeklyReportType) => {
       setCurrentReport({ ...report });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -146,7 +167,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       setIsFilling(true);
       const reportsToProcess = reports.filter(r => selectedReportIdsForFill.includes(r.id));
       
-      const consolidated = await generateConsolidatedReport(reportsToProcess, users, llmConfig);
+      const consolidated = await generateConsolidatedReport(reportsToProcess, users, teams, llmConfig);
       
       setCurrentReport({
           ...currentReport,
@@ -162,16 +183,16 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       setSelectedReportIdsForFill([]);
   }
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedEmail);
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
     alert("Copied to clipboard!");
   };
 
-  const exportToDoc = () => {
+  const exportToDoc = (text: string, filename: string) => {
       const element = document.createElement("a");
-      const file = new Blob([generatedEmail], {type: 'text/plain'});
+      const file = new Blob([text], {type: 'text/plain'});
       element.href = URL.createObjectURL(file);
-      element.download = "Weekly_Report_Summary.doc"; // Naming it .doc for user comfort, even if plain text
+      element.download = filename; 
       document.body.appendChild(element);
       element.click();
   };
@@ -395,7 +416,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                       </button>
                       <div className="flex gap-2">
                           <button 
-                            onClick={exportToDoc}
+                            onClick={() => exportToDoc(generatedEmail, "Weekly_Report_Email.doc")}
                             disabled={isGenerating}
                             className="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
                           >
@@ -403,9 +424,67 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                               Export (.doc)
                           </button>
                           <button 
-                            onClick={copyToClipboard}
+                            onClick={() => copyToClipboard(generatedEmail)}
                             disabled={isGenerating}
                             className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                          >
+                              <Copy className="w-4 h-4" />
+                              Copy
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+        )}
+
+        {/* Manager Synthesis Modal */}
+        {showSynthesisModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-slate-200 dark:border-slate-700">
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-gradient-to-r from-purple-600 to-indigo-600 rounded-t-2xl">
+                      <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                          <Sparkles className="w-5 h-5 text-yellow-300" />
+                          Manager Synthesis (AI)
+                      </h3>
+                      <button onClick={() => setShowSynthesisModal(false)} className="text-white hover:text-indigo-200">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto flex-1 bg-slate-50 dark:bg-slate-950">
+                      {isSynthesizing ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-slate-500 dark:text-slate-400">
+                              <Loader2 className="w-10 h-10 animate-spin mb-4 text-purple-600" />
+                              <p className="font-medium">Analyzing data & Generating synthesis...</p>
+                              <p className="text-xs mt-2 text-slate-400">Restructuring by project • Highlighting key facts</p>
+                          </div>
+                      ) : (
+                          <div className="prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-800 p-8 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                              <FormattedText text={synthesisResult} />
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-3 bg-white dark:bg-slate-900 rounded-b-2xl">
+                      <button 
+                        onClick={() => setShowSynthesisModal(false)}
+                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                      >
+                          Close
+                      </button>
+                      <div className="flex gap-2">
+                          <button 
+                            onClick={() => exportToDoc(synthesisResult, "Manager_Synthesis.doc")}
+                            disabled={isSynthesizing}
+                            className="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                          >
+                              <Download className="w-4 h-4" />
+                              Export (.doc)
+                          </button>
+                          <button 
+                            onClick={() => copyToClipboard(synthesisResult)}
+                            disabled={isSynthesizing}
+                            className="px-4 py-2 text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
                           >
                               <Copy className="w-4 h-4" />
                               Copy
@@ -516,10 +595,20 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                             
                             {llmConfig && (
                                 <button 
+                                    onClick={handleManagerSynthesis}
+                                    className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 py-2 rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-colors flex items-center shadow-md text-sm"
+                                    title="Generate structured synthesis from current report fields"
+                                >
+                                    <Sparkles className="w-4 h-4 mr-2" /> Manager Synthèse
+                                </button>
+                            )}
+
+                            {llmConfig && (
+                                <button 
                                     onClick={() => handleGenerateEmail()}
                                     className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 py-2 rounded-lg font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center border border-indigo-200 dark:border-indigo-800 text-sm"
                                 >
-                                    <Mail className="w-4 h-4 mr-2" /> Generate AI Email
+                                    <Mail className="w-4 h-4 mr-2" /> AI Email
                                 </button>
                             )}
 

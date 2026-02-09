@@ -1,180 +1,199 @@
+
 import React from 'react';
 import { Team, TaskStatus } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { CheckCircle2, Circle, Clock, AlertCircle } from 'lucide-react';
 
 interface KPIDashboardProps {
   teams: Team[];
 }
 
 const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
-  // Aggregate data for Global Stats
+  // --- Data Aggregation ---
   let totalTasks = 0;
   let totalClosed = 0;
   let totalBlocked = 0;
   let totalOngoing = 0;
+  let totalTodo = 0;
 
   teams.forEach(t => {
     t.projects.forEach(p => {
+      p.projects?.forEach((sub: any) => {}); // Handle potential recursive if needed, but assuming flat structure here based on types
       p.tasks.forEach(task => {
         totalTasks++;
         if (task.status === TaskStatus.DONE) totalClosed++;
         if (task.status === TaskStatus.BLOCKED) totalBlocked++;
         if (task.status === TaskStatus.ONGOING) totalOngoing++;
+        if (task.status === TaskStatus.TODO) totalTodo++;
       });
     });
   });
 
   const completionRate = totalTasks > 0 ? Math.round((totalClosed / totalTasks) * 100) : 0;
 
-  // Chart Data: Tasks per Team by Status
-  const teamStatusData = teams.map(t => {
-    let closed = 0;
-    let ongoing = 0;
-    let blocked = 0;
-    let todo = 0;
+  // --- Components for Native Charts ---
 
-    t.projects.forEach(p => {
-        p.tasks.forEach(task => {
-            if (task.status === TaskStatus.DONE) closed++;
-            if (task.status === TaskStatus.ONGOING) ongoing++;
-            if (task.status === TaskStatus.BLOCKED) blocked++;
-            if (task.status === TaskStatus.TODO) todo++;
-        });
-    });
-
-    return {
-        name: t.name,
-        Done: closed,
-        InProgress: ongoing,
-        Blocked: blocked,
-        ToDo: todo
-    };
-  });
-
-  // Pie Chart Data
-  const statusDistribution = [
-    { name: 'Done', value: totalClosed, color: '#10B981' },
-    { name: 'In Progress', value: totalOngoing, color: '#3B82F6' },
-    { name: 'Blocked', value: totalBlocked, color: '#EF4444' },
-    { name: 'To Do', value: totalTasks - totalClosed - totalOngoing - totalBlocked, color: '#94a3b8' }
-  ].filter(d => d.value > 0);
-
-  const StatCard = ({ title, value, subtext, colorClass, barColor }: any) => (
-    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-        <h3 className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">{title}</h3>
-        <div className="flex items-end mt-4">
-            <span className={`text-4xl font-extrabold tracking-tight ${colorClass || 'text-slate-900 dark:text-white'}`}>{value}</span>
+  const StatCard = ({ title, value, subtext, colorClass, icon: Icon }: any) => (
+    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+        <div className="flex justify-between items-start mb-4">
+            <h3 className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">{title}</h3>
+            {Icon && <Icon className={`w-5 h-5 ${colorClass} opacity-80`} />}
         </div>
-        {barColor && (
-             <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 mt-4">
-                <div className={`${barColor} h-1.5 rounded-full`} style={{ width: `${value}` }}></div>
-            </div>
-        )}
-        <p className="text-xs text-slate-400 mt-2">{subtext}</p>
+        <div>
+            <span className={`text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white`}>{value}</span>
+            <p className="text-xs text-slate-400 mt-1">{subtext}</p>
+        </div>
     </div>
   );
 
+  // Simple Native Donut Chart using SVG
+  const DonutChart = () => {
+    const radius = 70;
+    const circumference = 2 * Math.PI * radius;
+    let accumulatedPercent = 0;
+
+    const data = [
+      { label: 'Done', value: totalClosed, color: 'text-emerald-500' },
+      { label: 'In Progress', value: totalOngoing, color: 'text-blue-500' },
+      { label: 'Blocked', value: totalBlocked, color: 'text-red-500' },
+      { label: 'To Do', value: totalTodo, color: 'text-slate-300 dark:text-slate-600' }
+    ].filter(d => d.value > 0);
+
+    return (
+      <div className="relative w-64 h-64 flex items-center justify-center">
+        <svg className="w-full h-full transform -rotate-90">
+          {data.map((item, index) => {
+            const percent = item.value / totalTasks;
+            const dashArray = `${percent * circumference} ${circumference}`;
+            const dashOffset = -accumulatedPercent * circumference;
+            accumulatedPercent += percent;
+
+            return (
+              <circle
+                key={index}
+                cx="50%"
+                cy="50%"
+                r={radius}
+                fill="transparent"
+                stroke="currentColor"
+                strokeWidth="20"
+                strokeDasharray={dashArray}
+                strokeDashoffset={dashOffset}
+                className={`${item.color} transition-all duration-1000 ease-out`}
+              />
+            );
+          })}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-4xl font-bold text-slate-900 dark:text-white">{totalTasks}</span>
+          <span className="text-xs text-slate-500 uppercase font-semibold">Total Tasks</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-8 max-w-7xl mx-auto animate-in fade-in">
       {/* KPI Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard 
             title="Completion Rate" 
             value={`${completionRate}%`} 
-            barColor="bg-emerald-500" 
-            subtext="Global across all teams"
-            colorClass="text-slate-900 dark:text-white"
-        />
-        <StatCard 
-            title="Total Tasks" 
-            value={totalTasks} 
-            subtext={`Distributed in ${teams.length} teams`}
+            icon={CheckCircle2}
+            colorClass="text-emerald-500"
+            subtext="Global completion"
         />
         <StatCard 
             title="Active Work" 
             value={totalOngoing} 
-            colorClass="text-blue-600 dark:text-blue-400"
-            subtext="Tasks currently in progress"
+            icon={Circle}
+            colorClass="text-blue-500"
+            subtext="Tasks in progress"
         />
         <StatCard 
             title="Bottlenecks" 
             value={totalBlocked} 
-            colorClass="text-red-600 dark:text-red-400"
-            subtext="Tasks marked as blocked"
+            icon={AlertCircle}
+            colorClass="text-red-500"
+            subtext="Blocked tasks"
+        />
+        <StatCard 
+            title="Total Scope" 
+            value={totalTasks} 
+            icon={Clock}
+            colorClass="text-slate-400"
+            subtext="Total tasks recorded"
         />
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* Main Bar Chart */}
+        {/* Native Stacked Bar Chart for Team Workload */}
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 lg:col-span-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">Team Workload Distribution</h3>
-            <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={teamStatusData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                        <Tooltip 
-                            cursor={{ fill: 'rgba(241, 245, 249, 0.1)' }}
-                            contentStyle={{ 
-                                backgroundColor: '#1e293b', 
-                                border: 'none', 
-                                borderRadius: '8px', 
-                                color: '#fff',
-                                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                            }}
-                        />
-                        <Legend wrapperStyle={{ paddingTop: '24px' }} iconType="circle" />
-                        <Bar dataKey="Done" stackId="a" fill="#10B981" radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="InProgress" stackId="a" fill="#3B82F6" />
-                        <Bar dataKey="Blocked" stackId="a" fill="#EF4444" />
-                        <Bar dataKey="ToDo" stackId="a" fill="#94a3b8" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                </ResponsiveContainer>
+            <div className="space-y-6">
+                {teams.map(team => {
+                    let tDone = 0, tProg = 0, tBlock = 0, tTodo = 0;
+                    team.projects.forEach(p => {
+                        p.tasks.forEach(t => {
+                            if(t.status === TaskStatus.DONE) tDone++;
+                            else if(t.status === TaskStatus.ONGOING) tProg++;
+                            else if(t.status === TaskStatus.BLOCKED) tBlock++;
+                            else tTodo++;
+                        });
+                    });
+                    const tTotal = tDone + tProg + tBlock + tTodo;
+                    if (tTotal === 0) return null;
+
+                    return (
+                        <div key={team.id}>
+                            <div className="flex justify-between text-sm mb-2">
+                                <span className="font-semibold text-slate-700 dark:text-slate-200">{team.name}</span>
+                                <span className="text-slate-500">{tTotal} tasks</span>
+                            </div>
+                            <div className="h-4 w-full bg-slate-100 dark:bg-slate-700 rounded-full flex overflow-hidden">
+                                {tDone > 0 && <div style={{width: `${(tDone/tTotal)*100}%`}} className="bg-emerald-500 h-full" title={`Done: ${tDone}`}></div>}
+                                {tProg > 0 && <div style={{width: `${(tProg/tTotal)*100}%`}} className="bg-blue-500 h-full" title={`In Progress: ${tProg}`}></div>}
+                                {tBlock > 0 && <div style={{width: `${(tBlock/tTotal)*100}%`}} className="bg-red-500 h-full" title={`Blocked: ${tBlock}`}></div>}
+                                {tTodo > 0 && <div style={{width: `${(tTodo/tTotal)*100}%`}} className="bg-slate-300 dark:bg-slate-600 h-full" title={`Todo: ${tTodo}`}></div>}
+                            </div>
+                        </div>
+                    );
+                })}
+                {teams.length === 0 && <p className="text-slate-400 italic">No teams defined.</p>}
+            </div>
+            
+            {/* Legend */}
+            <div className="flex flex-wrap gap-4 mt-8 justify-center">
+                <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-emerald-500 rounded-full mr-2"></span>Done</div>
+                <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>In Progress</div>
+                <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>Blocked</div>
+                <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-slate-300 dark:bg-slate-600 rounded-full mr-2"></span>To Do</div>
             </div>
         </div>
 
-        {/* Pie Chart */}
+        {/* Native Donut Chart */}
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 self-start w-full">Project Health</h3>
-            <div className="h-64 w-full relative">
-                 <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                        <Pie
-                            data={statusDistribution}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={70}
-                            outerRadius={90}
-                            paddingAngle={5}
-                            dataKey="value"
-                            stroke="none"
-                        >
-                            {statusDistribution.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                        </Pie>
-                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none' }} />
-                    </PieChart>
-                </ResponsiveContainer>
-                {/* Center Text */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-3xl font-bold text-slate-900 dark:text-white">{totalTasks}</span>
-                    <span className="text-xs text-slate-500 uppercase font-semibold">Tasks</span>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6 self-start">Global Health</h3>
+            
+            {totalTasks > 0 ? <DonutChart /> : (
+                <div className="h-64 w-full flex items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-full">
+                    No Data
                 </div>
-            </div>
-             <div className="w-full space-y-2 mt-4">
-                 {statusDistribution.map(s => (
-                     <div key={s.name} className="flex justify-between items-center text-sm">
-                         <div className="flex items-center">
-                             <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: s.color }}></div>
-                             <span className="text-slate-600 dark:text-slate-300">{s.name}</span>
-                         </div>
-                         <span className="font-semibold text-slate-900 dark:text-white">{s.value}</span>
-                     </div>
-                 ))}
+            )}
+
+             <div className="w-full space-y-3 mt-8">
+                 <div className="flex justify-between items-center text-sm border-b border-slate-100 dark:border-slate-700 pb-2">
+                     <div className="flex items-center"><div className="w-3 h-3 rounded-full mr-2 bg-emerald-500"></div>Done</div>
+                     <span className="font-bold text-slate-700 dark:text-white">{totalClosed}</span>
+                 </div>
+                 <div className="flex justify-between items-center text-sm border-b border-slate-100 dark:border-slate-700 pb-2">
+                     <div className="flex items-center"><div className="w-3 h-3 rounded-full mr-2 bg-blue-500"></div>In Progress</div>
+                     <span className="font-bold text-slate-700 dark:text-white">{totalOngoing}</span>
+                 </div>
+                 <div className="flex justify-between items-center text-sm border-b border-slate-100 dark:border-slate-700 pb-2">
+                     <div className="flex items-center"><div className="w-3 h-3 rounded-full mr-2 bg-red-500"></div>Blocked</div>
+                     <span className="font-bold text-slate-700 dark:text-white">{totalBlocked}</span>
+                 </div>
              </div>
         </div>
       </div>

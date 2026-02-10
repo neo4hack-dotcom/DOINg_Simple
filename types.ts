@@ -1,6 +1,4 @@
 
-
-
 export enum UserRole {
   ADMIN = 'Admin',
   MANAGER = 'Manager',
@@ -12,6 +10,14 @@ export enum TaskStatus {
   ONGOING = 'In Progress',
   BLOCKED = 'Blocked',
   DONE = 'Done'
+}
+
+export type TaskActionStatus = 'To Do' | 'Ongoing' | 'Blocked' | 'Done';
+
+export interface TaskAction {
+  id: string;
+  text: string;
+  status: TaskActionStatus;
 }
 
 export enum TaskPriority {
@@ -94,6 +100,7 @@ export interface Task {
   eta: string; 
   dependencies?: string[]; // Internal dependencies (Task IDs)
   externalDependencies?: ExternalDependency[]; // New: External systems/people
+  actions?: TaskAction[]; // New: Sub-actions with statuses
   weight: number; 
   isImportant: boolean; 
   checklist?: ChecklistItem[]; 
@@ -111,6 +118,8 @@ export interface Project {
   description: string;
   status: ProjectStatus;
   managerId?: string; 
+  owner?: string; // New: Product Owner / Business Owner (User name or external)
+  architect?: string; // New: Technical Architect (User name or external)
   deadline: string; 
   members: ProjectMember[];
   tasks: Task[];

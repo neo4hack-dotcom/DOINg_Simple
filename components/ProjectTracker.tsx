@@ -1,14 +1,12 @@
 
-
-
 import React, { useState, useEffect } from 'react';
-import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency } from '../types';
+import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency, TaskAction, TaskActionStatus } from '../types';
 import { generateTeamReport, generateProjectRoadmap } from '../services/llmService';
 import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -38,6 +36,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   
   // Checklist Item Commenting
   const [checklistCommentId, setChecklistCommentId] = useState<string | null>(null); // Track which item is being commented on
+
+  // New Action State
+  const [newActionText, setNewActionText] = useState('');
 
   // New Dependency State
   const [newDepLabel, setNewDepLabel] = useState('');
@@ -73,6 +74,15 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       case ProjectStatus.PLANNING: return 'bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 border-purple-200 dark:border-purple-500/20';
       default: return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-600';
     }
+  };
+
+  const getActionStatusColor = (status: TaskActionStatus) => {
+      switch(status) {
+          case 'Done': return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800';
+          case 'Blocked': return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+          case 'Ongoing': return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800';
+          case 'To Do': return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600';
+      }
   };
 
   const getPriorityColor = (priority: TaskPriority) => {
@@ -172,6 +182,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           description: '',
           status: ProjectStatus.PLANNING,
           managerId: currentUser?.id,
+          owner: '',
+          architect: '',
           deadline: new Date().toISOString().split('T')[0],
           members: [],
           tasks: [],
@@ -206,6 +218,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           weight: 1,
           isImportant: false,
           checklist: [],
+          actions: [],
           externalDependencies: [],
           order: 1
       };
@@ -267,6 +280,35 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
         }
       });
       setEditingTask(null);
+  };
+
+  // --- Action Items Handlers (TaskActions) ---
+  const handleAddAction = () => {
+      if (!editingTask || !newActionText.trim()) return;
+      const newAction: TaskAction = {
+          id: Date.now().toString(),
+          text: newActionText,
+          status: 'To Do'
+      };
+      setEditingTask({
+          ...editingTask,
+          task: { ...editingTask.task, actions: [...(editingTask.task.actions || []), newAction] }
+      });
+      setNewActionText('');
+  };
+
+  const handleUpdateActionStatus = (actionId: string, newStatus: TaskActionStatus) => {
+      if (!editingTask) return;
+      const updatedActions = (editingTask.task.actions || []).map(a => 
+          a.id === actionId ? { ...a, status: newStatus } : a
+      );
+      setEditingTask({ ...editingTask, task: { ...editingTask.task, actions: updatedActions } });
+  };
+
+  const handleDeleteAction = (actionId: string) => {
+      if (!editingTask) return;
+      const updatedActions = (editingTask.task.actions || []).filter(a => a.id !== actionId);
+      setEditingTask({ ...editingTask, task: { ...editingTask.task, actions: updatedActions } });
   };
 
   // Checklist Handlers
@@ -396,7 +438,14 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
-      {/* AI Roadmap Modal */}
+      {/* Datalist for User suggestions (used in Project Owner/Architect inputs) */}
+      <datalist id="user-list-suggestions">
+          {users.map(u => (
+              <option key={u.id} value={`${u.firstName} ${u.lastName}`} />
+          ))}
+      </datalist>
+
+      {/* ... (AI Roadmap Modal - No changes) ... */}
       {showRoadmapModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-slate-200 dark:border-slate-700">
@@ -454,7 +503,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* Project Edit Modal */}
+      {/* ... (Project Edit Modal - No changes) ... */}
       {editingProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col max-h-[90vh]">
@@ -471,6 +520,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Description</label>
                           <textarea value={editingProject.description} onChange={e => setEditingProject({...editingProject, description: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" rows={3} />
                       </div>
+                      
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
@@ -481,6 +531,36 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Deadline</label>
                             <input type="date" value={editingProject.deadline} onChange={e => setEditingProject({...editingProject, deadline: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
+                          </div>
+                      </div>
+
+                      {/* Owner & Architect Fields */}
+                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
+                                  <Crown className="w-3 h-3 text-amber-500" /> Project Owner
+                              </label>
+                              <input 
+                                  list="user-list-suggestions" 
+                                  type="text"
+                                  value={editingProject.owner || ''} 
+                                  onChange={e => setEditingProject({...editingProject, owner: e.target.value})}
+                                  className="w-full p-2 text-sm border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white placeholder-slate-400"
+                                  placeholder="Select or type name..."
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
+                                  <PenTool className="w-3 h-3 text-indigo-500" /> Architect
+                              </label>
+                              <input 
+                                  list="user-list-suggestions" 
+                                  type="text"
+                                  value={editingProject.architect || ''} 
+                                  onChange={e => setEditingProject({...editingProject, architect: e.target.value})}
+                                  className="w-full p-2 text-sm border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white placeholder-slate-400"
+                                  placeholder="Select or type name..."
+                              />
                           </div>
                       </div>
 
@@ -529,7 +609,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                       </div>
 
-                      {/* AI Context Fields (Hidden by default logic handled in rendering, here we show inputs) */}
+                      {/* AI Context Fields */}
                       <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
                           <label className="block text-sm font-bold text-indigo-700 dark:text-indigo-400 mb-2 flex items-center">
                               <Sparkles className="w-4 h-4 mr-2" />
@@ -698,6 +778,44 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                       </div>
 
+                      {/* --- TASK ACTIONS SECTION (NEW) --- */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                              <LayoutList className="w-4 h-4" /> Task Actions / Sub-steps
+                          </label>
+                          <div className="space-y-2 mb-3">
+                              {(editingTask.task.actions || []).map(action => (
+                                  <div key={action.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 p-2 rounded border border-slate-100 dark:border-slate-700 group">
+                                      <select 
+                                          value={action.status} 
+                                          onChange={(e) => handleUpdateActionStatus(action.id, e.target.value as any)}
+                                          className={`text-[10px] uppercase font-bold px-2 py-1 rounded cursor-pointer border focus:outline-none ${getActionStatusColor(action.status)}`}
+                                      >
+                                          <option value="To Do">To Do</option>
+                                          <option value="Ongoing">Ongoing</option>
+                                          <option value="Blocked">Blocked</option>
+                                          <option value="Done">Done</option>
+                                      </select>
+                                      <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">{action.text}</span>
+                                      <button onClick={() => handleDeleteAction(action.id)} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <Trash2 className="w-4 h-4" />
+                                      </button>
+                                  </div>
+                              ))}
+                          </div>
+                          <div className="flex gap-2">
+                              <input 
+                                  type="text" 
+                                  value={newActionText}
+                                  onChange={e => setNewActionText(e.target.value)}
+                                  placeholder="Add an action step..."
+                                  className="flex-1 p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm"
+                                  onKeyDown={e => e.key === 'Enter' && handleAddAction()}
+                              />
+                              <button onClick={handleAddAction} className="px-3 py-2 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-sm font-medium">Add</button>
+                          </div>
+                      </div>
+
                       <div className="flex items-center gap-2 mt-2">
                           <input type="checkbox" id="taskImp" checked={editingTask.task.isImportant} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, isImportant: e.target.checked}})} className="w-4 h-4 text-indigo-600 rounded" />
                           <label htmlFor="taskImp" className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1"><AlertTriangle className="w-4 h-4 text-red-500" /> Mark as Important</label>
@@ -770,6 +888,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
+      {/* ... (Team Header, AI Report, Bulk Selection components remain same) ... */}
+      
       {/* Team Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -933,17 +1053,31 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             </div>
                             <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">{project.description}</p>
                             
-                            {/* Display Project Dependencies RAG */}
-                            {project.externalDependencies && project.externalDependencies.length > 0 && (
-                                <div className="flex gap-2 mt-2 flex-wrap">
-                                    {project.externalDependencies.map(dep => (
-                                        <div key={dep.id} className="flex items-center text-[10px] bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                                            <span className={`w-2 h-2 rounded-full mr-1.5 ${getRagColor(dep.status).split(' ')[0]}`}></span>
-                                            <span className="text-slate-700 dark:text-slate-300 font-medium">{dep.label}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            {/* Display Project Dependencies RAG & Roles */}
+                            <div className="flex flex-wrap gap-2 mt-2 items-center">
+                                {project.owner && (
+                                    <span className="flex items-center text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-100 dark:border-amber-800" title="Product Owner">
+                                        <Crown className="w-3 h-3 mr-1" /> {project.owner}
+                                    </span>
+                                )}
+                                {project.architect && (
+                                    <span className="flex items-center text-[10px] bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded border border-purple-100 dark:border-purple-800" title="Architect">
+                                        <PenTool className="w-3 h-3 mr-1" /> {project.architect}
+                                    </span>
+                                )}
+
+                                {project.externalDependencies && project.externalDependencies.length > 0 && (
+                                    <>
+                                        <div className="h-3 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
+                                        {project.externalDependencies.map(dep => (
+                                            <div key={dep.id} className="flex items-center text-[10px] bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                                                <span className={`w-2 h-2 rounded-full mr-1.5 ${getRagColor(dep.status).split(' ')[0]}`}></span>
+                                                <span className="text-slate-700 dark:text-slate-300 font-medium">{dep.label}</span>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                            </div>
                         </div>
 
                         {/* Meta Stats */}
@@ -1067,6 +1201,10 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                     {sortedTasks.map(task => {
                                         const checklistDone = task.checklist ? task.checklist.filter(i => i.done).length : 0;
                                         const checklistTotal = task.checklist ? task.checklist.length : 0;
+                                        const actionsDone = task.actions ? task.actions.filter(a => a.status === 'Done').length : 0;
+                                        const actionsTotal = task.actions ? task.actions.length : 0;
+                                        const blockedActions = task.actions ? task.actions.filter(a => a.status === 'Blocked').length : 0;
+                                        
                                         const assigneeUser = users.find(u => u.id === task.assigneeId);
                                         const isExternalAssignee = task.assigneeId && !assigneeUser;
 
@@ -1083,6 +1221,29 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                 </div>
                                                 <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{task.description}</div>
                                                 
+                                                {/* Actions Progress Bar if actions exist */}
+                                                {actionsTotal > 0 && (
+                                                    <div className="mt-2 flex items-center gap-2 w-full max-w-[200px]">
+                                                        <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden flex">
+                                                            {task.actions?.map((action, idx) => (
+                                                                <div 
+                                                                    key={idx} 
+                                                                    className={`h-full flex-1 ${
+                                                                        action.status === 'Done' ? 'bg-emerald-500' :
+                                                                        action.status === 'Blocked' ? 'bg-red-500' :
+                                                                        action.status === 'Ongoing' ? 'bg-blue-500' :
+                                                                        'bg-transparent' // To Do remains bg color
+                                                                    }`}
+                                                                    style={{ borderRight: idx !== actionsTotal - 1 ? '1px solid white' : 'none' }}
+                                                                ></div>
+                                                            ))}
+                                                        </div>
+                                                        <span className={`text-[10px] font-bold ${blockedActions > 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                                            {actionsDone}/{actionsTotal}
+                                                        </span>
+                                                    </div>
+                                                )}
+
                                                 {/* Task Dependencies Display */}
                                                 {task.externalDependencies && task.externalDependencies.length > 0 && (
                                                     <div className="flex gap-2 mt-1.5 flex-wrap">

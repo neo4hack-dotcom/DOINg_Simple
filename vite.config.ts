@@ -6,16 +6,22 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   // IMPORTANT pour Windows: base relative permet de charger les assets
-  // même si l'app n'est pas à la racine du serveur web.
   base: './', 
   server: {
     port: 3000,
-    host: true // Expose to network if needed
+    host: true, // Expose to network if needed
+    proxy: {
+      // Redirige tous les appels API (commençant par /api) vers le serveur Node (port 3001)
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   },
   build: {
     outDir: 'dist',
     sourcemap: false,
-    // Optimizations for smaller bundle size
     rollupOptions: {
       output: {
         manualChunks: {

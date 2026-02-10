@@ -1,10 +1,9 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, LLMConfig, LLMProvider, User, UserRole } from '../types';
 import { fetchOllamaModels, DEFAULT_PROMPTS, testConnection } from '../services/llmService';
 import { clearState } from '../services/storage';
-import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle, Merge } from 'lucide-react';
+import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle, Merge, HardDrive } from 'lucide-react';
 
 interface SettingsPanelProps {
   config: LLMConfig;
@@ -30,12 +29,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [newPassword, setNewPassword] = useState('');
 
+  // DB Path Config (Admin Only)
+  const [serverDbPath, setServerDbPath] = useState('');
+  const [dbPathLoading, setDbPathLoading] = useState(false);
+
   // Load models if Ollama is selected initially
   useEffect(() => {
     if (localConfig.provider === 'ollama') {
       handleRefreshOllama();
     }
-  }, []);
+    // Fetch DB path if admin
+    if (appState?.currentUser?.role === UserRole.ADMIN) {
+        fetch('/api/config/db-path')
+            .then(res => res.json())
+            .then(data => {
+                if (data.path) setServerDbPath(data.path);
+            })
+            .catch(err => console.error("Could not fetch DB path", err));
+    }
+  }, [appState?.currentUser]);
 
   const handleRefreshOllama = async () => {
     setLoadingModels(true);
@@ -73,6 +85,28 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
           setNewPassword('');
           setSelectedUserId('');
       }
+  };
+
+  const handleUpdateDbPath = () => {
+      if (!serverDbPath.trim()) return;
+      if (!window.confirm("Changing the DB Path requires the server to be able to write to the new location. Are you sure?")) return;
+      
+      setDbPathLoading(true);
+      fetch('/api/config/db-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: serverDbPath })
+      })
+      .then(res => res.json())
+      .then(data => {
+          if(data.success) {
+              alert("DB Path updated successfully. Server is now using: " + data.path);
+          } else {
+              alert("Failed to update DB path.");
+          }
+      })
+      .catch(err => alert("Error connecting to server."))
+      .finally(() => setDbPathLoading(false));
   };
 
   const handleExport = () => {
@@ -341,6 +375,46 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
             <>
             {/* General Settings Content */}
             
+            {/* SERVER CONFIG SECTION (ADMIN ONLY) */}
+            {appState?.currentUser?.role === UserRole.ADMIN && (
+                <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                        <HardDrive className="w-5 h-5 text-indigo-500" />
+                        Server Configuration (Admin)
+                    </h3>
+                    <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Database File Location (db.json)</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text"
+                                        value={serverDbPath}
+                                        onChange={(e) => setServerDbPath(e.target.value)}
+                                        className="flex-1 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-mono text-slate-900 dark:text-white"
+                                        placeholder="/path/to/your/db.json"
+                                    />
+                                    <button 
+                                        onClick={handleUpdateDbPath}
+                                        disabled={dbPathLoading}
+                                        className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {dbPathLoading ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
+                                        Update Path
+                                    </button>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-2">
+                                    Current absolute path on the server. Change this to move where your data is stored.
+                                    <br/>
+                                    <span className="text-amber-500">Warning: Ensure the server process has Write permissions to the new directory.</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <hr className="border-slate-100 dark:border-slate-700 my-8" />
+                </div>
+            )}
+
             {/* Security Section */}
             <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">

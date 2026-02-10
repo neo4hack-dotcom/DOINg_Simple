@@ -1,12 +1,14 @@
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency } from '../types';
-import { generateTeamReport } from '../services/llmService';
+import { generateTeamReport, generateProjectRoadmap } from '../services/llmService';
 import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -33,6 +35,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   
   // New Checklist Item State
   const [newChecklistItem, setNewChecklistItem] = useState('');
+  
+  // Checklist Item Commenting
+  const [checklistCommentId, setChecklistCommentId] = useState<string | null>(null); // Track which item is being commented on
 
   // New Dependency State
   const [newDepLabel, setNewDepLabel] = useState('');
@@ -40,6 +45,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   // View Context State
   const [showContextForProject, setShowContextForProject] = useState<string | null>(null);
+
+  // AI Roadmap State
+  const [aiRoadmap, setAiRoadmap] = useState<string | null>(null);
+  const [loadingRoadmap, setLoadingRoadmap] = useState(false);
+  const [showRoadmapModal, setShowRoadmapModal] = useState(false);
 
   const currentTeam = teams.find(t => t.id === selectedTeamId);
   const teamManager = users.find(u => u.id === currentTeam?.managerId);
@@ -122,18 +132,27 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
     setLoadingAi(false);
   };
 
-  const copyToClipboard = () => {
-    if (!aiReport) return;
-    navigator.clipboard.writeText(aiReport);
+  const handleGenerateRoadmap = async (project: Project) => {
+      setLoadingRoadmap(true);
+      setShowRoadmapModal(true);
+      setAiRoadmap(null);
+      const roadmap = await generateProjectRoadmap(project, users, llmConfig, prompts);
+      setAiRoadmap(roadmap);
+      setLoadingRoadmap(false);
+  };
+
+  const copyToClipboard = (text: string | null) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
     alert("Copied to clipboard!");
   };
 
-  const exportToDoc = () => {
-      if (!aiReport) return;
+  const exportToDoc = (text: string | null, filename: string) => {
+      if (!text) return;
       const element = document.createElement("a");
-      const file = new Blob([aiReport], {type: 'text/plain'});
+      const file = new Blob([text], {type: 'text/plain'});
       element.href = URL.createObjectURL(file);
-      element.download = "Team_Report_AI.doc"; 
+      element.download = filename; 
       document.body.appendChild(element);
       element.click();
   };
@@ -256,7 +275,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       const newItem: ChecklistItem = {
           id: Date.now().toString(),
           text: newChecklistItem,
-          done: false
+          done: false,
+          comment: ''
       };
       setEditingTask({
           ...editingTask,
@@ -276,6 +296,14 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const handleDeleteChecklistItem = (itemId: string) => {
       if (!editingTask) return;
       const updatedList = (editingTask.task.checklist || []).filter(item => item.id !== itemId);
+      setEditingTask({ ...editingTask, task: { ...editingTask.task, checklist: updatedList } });
+  };
+
+  const handleUpdateChecklistComment = (itemId: string, comment: string) => {
+      if (!editingTask) return;
+      const updatedList = (editingTask.task.checklist || []).map(item => 
+        item.id === itemId ? { ...item, comment } : item
+      );
       setEditingTask({ ...editingTask, task: { ...editingTask.task, checklist: updatedList } });
   };
 
@@ -336,9 +364,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   // Context Descriptions Handler
   const updateAdditionalDescription = (index: number, value: string) => {
       if (!editingProject) return;
-      const newDescriptions = [...(editingProject.additionalDescriptions || ['', '', ''])];
+      const newDescriptions = [...(editingProject.project.additionalDescriptions || ['', '', ''])];
       newDescriptions[index] = value;
-      setEditingProject({ ...editingProject, additionalDescriptions: newDescriptions });
+      setEditingProject({ ...editingProject, project: { ...editingProject.project, additionalDescriptions: newDescriptions } });
   };
 
   const calculateWeightedProgress = (tasks: Task[]) => {
@@ -368,6 +396,64 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
+      {/* AI Roadmap Modal */}
+      {showRoadmapModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-slate-200 dark:border-slate-700">
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-gradient-to-r from-blue-600 to-indigo-600 rounded-t-2xl">
+                      <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                          <Map className="w-5 h-5 text-white" />
+                          Project Booklet / Roadmap
+                      </h3>
+                      <button onClick={() => setShowRoadmapModal(false)} className="text-white hover:text-indigo-200">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto flex-1 bg-slate-50 dark:bg-slate-950">
+                      {loadingRoadmap ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-slate-500 dark:text-slate-400">
+                              <Sparkles className="w-10 h-10 animate-pulse mb-4 text-indigo-500" />
+                              <p className="font-medium">Generating roadmap & project booklet...</p>
+                              <p className="text-xs mt-2 text-slate-400">Analyzing tasks, deadlines and context layers</p>
+                          </div>
+                      ) : (
+                          <div className="prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-800 p-8 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                              <FormattedText text={aiRoadmap || "No content generated."} />
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-3 bg-white dark:bg-slate-900 rounded-b-2xl">
+                      <button 
+                        onClick={() => setShowRoadmapModal(false)}
+                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                      >
+                          Close
+                      </button>
+                      <div className="flex gap-2">
+                          <button 
+                            onClick={() => exportToDoc(aiRoadmap, "Project_Booklet.doc")}
+                            disabled={loadingRoadmap}
+                            className="px-4 py-2 text-sm font-medium bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                          >
+                              <Download className="w-4 h-4" />
+                              Export (.doc)
+                          </button>
+                          <button 
+                            onClick={() => copyToClipboard(aiRoadmap)}
+                            disabled={loadingRoadmap}
+                            className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                          >
+                              <Copy className="w-4 h-4" />
+                              Copy
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Project Edit Modal */}
       {editingProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -622,21 +708,42 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
                               <ListTodo className="w-4 h-4" /> Checklist
                           </label>
-                          <div className="space-y-2 mb-2">
+                          <div className="space-y-3 mb-2">
                               {(editingTask.task.checklist || []).map(item => (
-                                  <div key={item.id} className="flex items-center gap-2 group">
-                                      <input 
-                                        type="checkbox" 
-                                        checked={item.done} 
-                                        onChange={() => handleToggleChecklistItem(item.id)}
-                                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500 cursor-pointer" 
-                                      />
-                                      <span className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                                          {item.text}
-                                      </span>
-                                      <button onClick={() => handleDeleteChecklistItem(item.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <Trash2 className="w-4 h-4" />
-                                      </button>
+                                  <div key={item.id} className="group">
+                                      <div className="flex items-center gap-2">
+                                          <input 
+                                            type="checkbox" 
+                                            checked={item.done} 
+                                            onChange={() => handleToggleChecklistItem(item.id)}
+                                            className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500 cursor-pointer" 
+                                          />
+                                          <span className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                                              {item.text}
+                                          </span>
+                                          <button 
+                                            onClick={() => setChecklistCommentId(checklistCommentId === item.id ? null : item.id)}
+                                            className={`p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${item.comment ? 'text-indigo-500' : 'text-slate-300 opacity-0 group-hover:opacity-100'}`}
+                                            title="Add/Edit Comment"
+                                          >
+                                              <MessageCircle className="w-4 h-4" />
+                                          </button>
+                                          <button onClick={() => handleDeleteChecklistItem(item.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <Trash2 className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                      {/* Comment Input if Open or Exists */}
+                                      {(checklistCommentId === item.id || item.comment) && (
+                                          <div className="ml-6 mt-1 flex items-center gap-2">
+                                              <input 
+                                                type="text"
+                                                value={item.comment || ''}
+                                                onChange={(e) => handleUpdateChecklistComment(item.id, e.target.value)}
+                                                placeholder="Add a note..."
+                                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
+                                              />
+                                          </div>
+                                      )}
                                   </div>
                               ))}
                           </div>
@@ -724,14 +831,14 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                 </h3>
                 <div className="flex gap-2">
                     <button 
-                        onClick={exportToDoc}
+                        onClick={() => exportToDoc(aiReport, "Team_Report_AI.doc")}
                         className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
                         title="Export to Doc"
                     >
                         <Download className="w-4 h-4" />
                     </button>
                     <button 
-                        onClick={copyToClipboard}
+                        onClick={() => copyToClipboard(aiReport)}
                         className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
                         title="Copy to Clipboard"
                     >
@@ -925,12 +1032,21 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                     <ArrowUpAz className="w-3 h-3 mr-1" /> Sorted by Order
                                 </span>
                             </h4>
-                            <button 
-                                onClick={() => handleAddTask(project.id)}
-                                className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center"
-                            >
-                                <Plus className="w-4 h-4 mr-1" /> Add Task
-                            </button>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => handleGenerateRoadmap(project)}
+                                    className="text-sm font-bold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 flex items-center px-3 py-1 bg-purple-50 dark:bg-purple-900/20 rounded-md transition-colors"
+                                    disabled={loadingRoadmap}
+                                >
+                                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate Booklet
+                                </button>
+                                <button 
+                                    onClick={() => handleAddTask(project.id)}
+                                    className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md transition-colors"
+                                >
+                                    <Plus className="w-4 h-4 mr-1" /> Add Task
+                                </button>
+                            </div>
                         </div>
 
                         {/* Task List Table */}

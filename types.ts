@@ -1,5 +1,6 @@
 
 
+
 export enum UserRole {
   ADMIN = 'Admin',
   MANAGER = 'Manager',
@@ -73,6 +74,7 @@ export interface ChecklistItem {
   id: string;
   text: string;
   done: boolean;
+  comment?: string; // New: Per-item comment
 }
 
 // Nouvelle interface pour les dépendances externes avec statut RAG

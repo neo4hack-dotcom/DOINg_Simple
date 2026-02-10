@@ -1,4 +1,6 @@
 
+
+
 import { Team, User, TaskStatus, LLMConfig, Meeting, WeeklyReport, ChatMessage, Note, Project } from "../types";
 
 // --- DEFAULT PROMPTS ---
@@ -133,6 +135,35 @@ For each team, use a sub-header like "**Team Name**" and provide:
 *   List top 3 items management must focus on immediately.
 
 Be insightful, professional, and use formatting (bold, lists) to make it easy to read. Write in English.
+`,
+    project_roadmap: `
+You are a Senior Technical Program Manager. Your goal is to produce a "Project Booklet / Roadmap" based strictly on the provided raw data.
+
+DATA:
+{{DATA}}
+
+TASK:
+Rephrase the content to materialize a clear, professional Roadmap.
+Deduce the project phases from the tasks, deadlines, and context.
+
+MANDATORY STRUCTURE:
+
+### 📖 Executive Context
+(Reformulate the description and additional context layers into a professional intro).
+
+### 🛣️ Project Roadmap & Phases
+(Group tasks logically into phases if possible, or chronological blocks. Show progress).
+*   **Phase 1: [Name deduced]** (Status)
+    *   Key deliverables...
+*   **Phase 2: [Name deduced]** (Status) ...
+
+### ⚠️ Attention Points & Recommendations
+(Strictly FACTUAL. Do not invent risks not present in data).
+*   If blocked tasks exist: "Alert: [Task] is blocked."
+*   If deadline near: "Warning: Deadline approaching."
+*   If NO risks found in data, write: "✅ No specific alerts detected based on current data."
+
+Tone: Formal, "Consulting" style. 100% Accurate. No Hallucinations.
 `
 };
 
@@ -167,6 +198,53 @@ const prepareTeamData = (team: Team, manager: User | undefined): string => {
     ${projectSummaries}
   `;
 };
+
+const prepareProjectDetailData = (project: Project, users: User[]): string => {
+    const managerName = users.find(u => u.id === project.managerId)?.lastName || 'Unassigned';
+    
+    const contextLayers = (project.additionalDescriptions || [])
+        .filter(d => d.trim().length > 0)
+        .map((d, i) => `Hidden Context ${i+1}: ${d}`)
+        .join('\n');
+
+    const externalDeps = (project.externalDependencies || [])
+        .map(d => `- Dependency: ${d.label} (Status: ${d.status})`)
+        .join('\n');
+
+    const tasksData = project.tasks.map(t => {
+        const assignee = users.find(u => u.id === t.assigneeId)?.lastName || 'Unassigned';
+        const checklistInfo = t.checklist ? `(Checklist: ${t.checklist.filter(c => c.done).length}/${t.checklist.length} done)` : '';
+        const comments = t.checklist?.map(c => c.comment ? `  - Note on "${c.text}": ${c.comment}` : '').join('');
+        
+        return `
+        Task: ${t.title} [Status: ${t.status}, Priority: ${t.priority}]
+        - Description: ${t.description}
+        - ETA: ${t.eta || 'N/A'}
+        - Owner: ${assignee}
+        - ${checklistInfo}
+        ${comments}
+        `;
+    }).join('\n');
+
+    return `
+    PROJECT: ${project.name}
+    STATUS: ${project.status}
+    DEADLINE: ${project.deadline}
+    MANAGER: ${managerName}
+    
+    DESCRIPTION:
+    ${project.description}
+
+    ADDITIONAL CONTEXT (Private):
+    ${contextLayers}
+
+    EXTERNAL DEPENDENCIES:
+    ${externalDeps}
+
+    TASKS & ROADMAP DATA:
+    ${tasksData}
+    `;
+}
 
 const prepareMeetingData = (meeting: Meeting, teamName: string, attendeesNames: string[], users: User[]): string => {
   // Helper to resolve name (User object or Raw String)
@@ -371,6 +449,13 @@ export const generateTeamReport = async (team: Team, manager: User | undefined, 
   const prompt = fillTemplate(template, { DATA: data });
   return runPrompt(prompt, config);
 };
+
+export const generateProjectRoadmap = async (project: Project, users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+    const data = prepareProjectDetailData(project, users);
+    const template = customPrompts?.['project_roadmap'] || DEFAULT_PROMPTS.project_roadmap;
+    const prompt = fillTemplate(template, { DATA: data });
+    return runPrompt(prompt, config);
+}
 
 export const generateMeetingSummary = async (meeting: Meeting, team: Team | undefined, users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
     const teamName = team ? team.name : 'General';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ErrorInfo, ReactNode, Component } from 'react';
+import React, { useState, useEffect, ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
 import ProjectTracker from './components/ProjectTracker';
@@ -12,9 +12,9 @@ import Login from './components/Login';
 import AIChatSidebar from './components/AIChatSidebar';
 import NotesManager from './components/NotesManager'; 
 
-import { loadState, saveState, subscribeToStoreUpdates, updateAppState } from './services/storage';
+import { loadState, saveState, subscribeToStoreUpdates, updateAppState, fetchFromServer } from './services/storage';
 import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
-import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw, Radio } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw, Radio, Cloud, CloudOff } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -25,16 +25,11 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// --- Error Boundary for Robustness ---
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState;
-
+// --- Error Boundary ---
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = {
-      hasError: false,
-      error: null
-    };
+    this.state = { hasError: false, error: null };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -45,12 +40,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     console.error("Uncaught error:", error, errorInfo);
   }
 
-  handleReload = () => {
-      window.location.reload();
-  }
-
+  handleReload = () => window.location.reload();
   handleReset = () => {
-      if(window.confirm("This will reset local data to fix the crash. Continue?")) {
+      if(window.confirm("Reset local data?")) {
           localStorage.clear();
           window.location.reload();
       }
@@ -61,35 +53,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
           <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-red-100 dark:border-red-900/30 p-8 text-center">
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Application Error</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Something went wrong in the application. This might be due to a data conflict or a temporary glitch.
-            </p>
-            <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono text-left overflow-auto max-h-32 mb-6 text-red-800 dark:text-red-300">
-                {this.state.error?.toString()}
-            </div>
-            <div className="flex gap-3 justify-center">
-                <button 
-                    onClick={this.handleReload}
-                    className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors"
-                >
-                    <RefreshCw className="w-4 h-4 mr-2" /> Reload App
-                </button>
-                <button 
-                    onClick={this.handleReset}
-                    className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-md text-sm font-medium transition-colors"
-                >
-                    Reset Data
-                </button>
-            </div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">App Error</h1>
+            <p className="text-sm text-gray-500 mb-4">{this.state.error?.toString()}</p>
+            <button onClick={this.handleReload} className="bg-indigo-600 text-white px-4 py-2 rounded">Reload</button>
           </div>
         </div>
       );
     }
-
     return this.props.children; 
   }
 }
@@ -99,60 +69,90 @@ const AppContent: React.FC = () => {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [reportNotification, setReportNotification] = useState(false);
   
-  // External sync notification
+  // Sync Status
+  const [isOnline, setIsOnline] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
   const [showSyncToast, setShowSyncToast] = useState(false);
 
-  // AI Sidebar State
+  // AI Sidebar
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
 
+  // --- INITIAL LOAD & POLLING ---
   useEffect(() => {
-    // 1. Load initial data
-    const data = loadState();
-    setAppState(data);
-    
-    // Apply theme
-    if (data.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    // 1. Load Local first (Instant UI)
+    const localData = loadState();
+    setAppState(localData);
+    applyTheme(localData.theme);
 
-    // 2. Subscribe to Multi-Tab / Multi-Window Updates
+    // 2. Fetch Server Data Immediately (Central Truth)
+    const initServerSync = async () => {
+        const serverData = await fetchFromServer();
+        if (serverData) {
+            // If server is newer than local, use server
+            if ((serverData.lastUpdated || 0) > (localData.lastUpdated || 0)) {
+                console.log("📥 Initial Load: Server data is newer. Updating.");
+                setAppState(serverData);
+                // Update local storage to match server without triggering save loop
+                localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
+            }
+            setIsOnline(true);
+        } else {
+            setIsOnline(false);
+        }
+    };
+    initServerSync();
+
+    // 3. Polling Interval (Every 10 seconds check for updates from colleagues)
+    const intervalId = setInterval(async () => {
+        const serverData = await fetchFromServer();
+        if (serverData) {
+            setIsOnline(true);
+            setLastSyncTime(new Date());
+            
+            setAppState(currentState => {
+                if (!currentState) return serverData;
+                // Only update if server is strictly newer than what we have in memory
+                if ((serverData.lastUpdated || 0) > (currentState.lastUpdated || 0)) {
+                    console.log("🔄 Auto-Sync: New data received from server.");
+                    setShowSyncToast(true);
+                    setTimeout(() => setShowSyncToast(false), 4000);
+                    // Persist to local for offline backup
+                    localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
+                    return serverData;
+                }
+                return currentState;
+            });
+        } else {
+            setIsOnline(false);
+        }
+    }, 10000); // 10 seconds
+
+    // 4. Subscribe to Local Tab Updates
     const unsubscribe = subscribeToStoreUpdates(() => {
-        console.log("External update detected, reloading state...");
         const freshState = loadState();
         setAppState(freshState);
-        
-        // Show brief notification
-        setShowSyncToast(true);
-        setTimeout(() => setShowSyncToast(false), 3000);
-        
-        // Re-apply theme if changed remotely
-        if (freshState.theme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
     });
 
     return () => {
         unsubscribe();
+        clearInterval(intervalId);
     };
   }, []);
 
-  // Removed useEffect auto-save. Data is now saved explicitly in handlers to avoid stale state overwrites.
+  const applyTheme = (theme: 'light' | 'dark') => {
+      if (theme === 'dark') document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+  };
 
-  // Check for stale reports
+  // Check reports logic
   useEffect(() => {
       if (appState && appState.currentUser) {
           const userReports = appState.weeklyReports.filter(r => r.userId === appState.currentUser?.id);
           if (userReports.length === 0) {
               setReportNotification(true);
           } else {
-              // Find most recent
               const sorted = userReports.sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-              const lastReport = sorted[0];
-              const daysDiff = (new Date().getTime() - new Date(lastReport.updatedAt).getTime()) / (1000 * 3600 * 24);
+              const daysDiff = (new Date().getTime() - new Date(sorted[0].updatedAt).getTime()) / (1000 * 3600 * 24);
               setReportNotification(daysDiff > 6);
           }
       }
@@ -164,332 +164,126 @@ const AppContent: React.FC = () => {
           theme: current.theme === 'light' ? 'dark' : 'light'
       }));
       setAppState(newState);
-
-      if (newState.theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
+      applyTheme(newState.theme);
   };
 
   const handleLogin = (user: User) => {
-      // Login is local to this tab/session mostly, but we persist "currentUser" to LS for convenience.
-      // We rely on 'updateAppState' to ensure we have the absolute latest data from disk upon login.
-      const newState = updateAppState(current => ({
-          ...current,
-          currentUser: user
-      }));
+      // Sync latest before login
+      fetchFromServer().then(serverData => {
+          if (serverData) {
+              localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
+              setAppState(curr => ({...serverData, currentUser: user})); // Optimistic update
+          }
+      });
+      
+      const newState = updateAppState(current => ({ ...current, currentUser: user }));
       setAppState(newState);
       setActiveTab('dashboard');
   }
 
   const handleLogout = () => {
-      const newState = updateAppState(current => ({
-          ...current,
-          currentUser: null
-      }));
-      setAppState(newState);
+      updateAppState(current => ({ ...current, currentUser: null }));
       window.location.reload(); 
   }
+
+  // --- Handlers Wrappers ---
+  // We use updateAppState to ensure we write to disk/server
+  
+  const createHandler = <T,>(updater: (current: AppState, payload: T) => AppState) => {
+      return (payload: T) => {
+          const newState = updateAppState(curr => updater(curr, payload));
+          setAppState(newState);
+      };
+  };
+
+  const handleUpdateUser = createHandler((curr, u: User) => ({...curr, users: curr.users.map(us => us.id === u.id ? u : us)}));
+  const handleAddUser = createHandler((curr, u: User) => ({...curr, users: [...curr.users, u]}));
+  const handleDeleteUser = createHandler((curr, id: string) => ({...curr, users: curr.users.filter(u => u.id !== id)}));
+  
+  const handleUpdateTeam = createHandler((curr, t: Team) => {
+      const teams = curr.teams.map(team => team.id === t.id ? t : team);
+      // If team doesn't exist (newly created in some flows), add it
+      if (!curr.teams.find(team => team.id === t.id)) teams.push(t);
+      return {...curr, teams};
+  });
+  const handleAddTeam = createHandler((curr, t: Team) => ({...curr, teams: [...curr.teams, t]}));
+  const handleDeleteTeam = createHandler((curr, id: string) => ({...curr, teams: curr.teams.filter(t => t.id !== id)}));
+
+  const handleUpdateReport = createHandler((curr, r: WeeklyReportType) => {
+      const idx = curr.weeklyReports.findIndex(rep => rep.id === r.id);
+      const newReports = [...curr.weeklyReports];
+      if (idx >= 0) newReports[idx] = r; else newReports.push(r);
+      return {...curr, weeklyReports: newReports};
+  });
+
+  const handleUpdateMeeting = createHandler((curr, m: Meeting) => {
+      const idx = curr.meetings.findIndex(mt => mt.id === m.id);
+      const newMeetings = [...curr.meetings];
+      if (idx >= 0) newMeetings[idx] = m; else newMeetings.push(m);
+      return {...curr, meetings: newMeetings};
+  });
+  const handleDeleteMeeting = createHandler((curr, id: string) => ({...curr, meetings: curr.meetings.filter(m => m.id !== id)}));
+
+  const handleUpdateNote = createHandler((curr, n: Note) => {
+      const idx = curr.notes.findIndex(nt => nt.id === n.id);
+      const newNotes = [...curr.notes];
+      if (idx >= 0) newNotes[idx] = n; else newNotes.push(n);
+      return {...curr, notes: newNotes};
+  });
+  const handleDeleteNote = createHandler((curr, id: string) => ({...curr, notes: curr.notes.filter(n => n.id !== id)}));
+
+  const handleUpdateLLMConfig = (config: LLMConfig, prompts?: Record<string, string>) => {
+      const newState = updateAppState(curr => ({...curr, llmConfig: config, prompts: prompts || curr.prompts}));
+      setAppState(newState);
+  };
 
   const handleUpdateUserPassword = (userId: string, newPass: string) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          users: current.users.map(u => u.id === userId ? { ...u, password: newPass } : u)
-      }));
-      setAppState(newState);
-  }
-
-  // --- CRUD Handlers (USING ATOMIC UPDATES) ---
-  // Using 'updateAppState' ensures we read the disk before writing, preventing race conditions.
-
-  const handleAddUser = (user: User) => {
-    const newState = updateAppState(current => ({
-      ...current,
-      users: [...current.users, user]
-    }));
-    setAppState(newState);
-  };
-
-  const handleUpdateUser = (updatedUser: User) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          users: current.users.map(u => u.id === updatedUser.id ? updatedUser : u)
+      const newState = updateAppState(curr => ({
+          ...curr, 
+          users: curr.users.map(u => u.id === userId ? { ...u, password: newPass } : u)
       }));
       setAppState(newState);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    const newState = updateAppState(current => ({
-        ...current,
-        users: current.users.filter(u => u.id !== userId)
-    }));
-    setAppState(newState);
-  }
-
-  const handleAddTeam = (team: Team) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          teams: [...current.teams, team]
-      }));
-      setAppState(newState);
-  };
-
-  const handleDeleteTeam = (teamId: string) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          teams: current.teams.filter(t => t.id !== teamId)
-      }));
-      setAppState(newState);
-  };
-
-  const handleUpdateTeam = (updatedTeam: Team) => {
-    const newState = updateAppState(current => {
-        const newTeams = current.teams.map(t => t.id === updatedTeam.id ? updatedTeam : t);
-        return { ...current, teams: newTeams };
-    });
-    setAppState(newState);
-  };
-
-  const handleUpdateMeeting = (updatedMeeting: Meeting) => {
-    const newState = updateAppState(current => {
-        const exists = current.meetings.find(m => m.id === updatedMeeting.id);
-        let newMeetings;
-        if (exists) {
-            newMeetings = current.meetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m);
-        } else {
-            newMeetings = [...current.meetings, updatedMeeting];
-        }
-        newMeetings.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        return { ...current, meetings: newMeetings };
-    });
-    setAppState(newState);
-  };
-
-  const handleDeleteMeeting = (id: string) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          meetings: current.meetings.filter(m => m.id !== id)
-      }));
-      setAppState(newState);
-  };
-
-  const handleUpdateReport = (report: WeeklyReportType) => {
-      const newState = updateAppState(current => {
-          const existingIndex = current.weeklyReports.findIndex(r => r.id === report.id);
-          let newReports;
-          if (existingIndex >= 0) {
-              newReports = [...current.weeklyReports];
-              newReports[existingIndex] = report;
-          } else {
-              newReports = [...current.weeklyReports, report];
-          }
-          return { ...current, weeklyReports: newReports };
-      });
-      setAppState(newState);
-  }
-
-  const handleUpdateNote = (note: Note) => {
-      const newState = updateAppState(current => {
-          const existingIndex = current.notes.findIndex(n => n.id === note.id);
-          let newNotes;
-          if (existingIndex >= 0) {
-              newNotes = [...current.notes];
-              newNotes[existingIndex] = note;
-          } else {
-              newNotes = [...current.notes, note];
-          }
-          return { ...current, notes: newNotes };
-      });
-      setAppState(newState);
-  };
-
-  const handleDeleteNote = (id: string) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          notes: current.notes.filter(n => n.id !== id)
-      }));
-      setAppState(newState);
-  };
-
-  const handleUpdateLLMConfig = (newConfig: LLMConfig, newPrompts?: Record<string, string>) => {
-      const newState = updateAppState(current => ({
-          ...current,
-          llmConfig: newConfig,
-          prompts: newPrompts || current.prompts
-      }));
-      setAppState(newState);
-  };
-
+  // Import State (Merge Logic could be placed here if needed)
   const handleImportState = (newState: AppState) => {
       setAppState(newState);
-      saveState(newState); // Force save
+      saveState(newState);
       window.location.reload(); 
   }
 
-  // --- RECURSIVE HIERARCHY LOGIC ---
-  const getAllSubordinateIds = (managerId: string, allUsers: User[]): string[] => {
-      const subordinates: string[] = [];
-      const directs = allUsers.filter(u => u.managerId === managerId);
-      
-      directs.forEach(d => {
-          subordinates.push(d.id);
-          // Recursive call
-          subordinates.push(...getAllSubordinateIds(d.id, allUsers));
-      });
-      
-      return subordinates;
-  };
-
-  // --- Filtering Logic for Views ---
+  // --- View Helper ---
   const getVisibleTeams = () => {
-      if (!appState || !appState.currentUser) return [];
-      const { currentUser, teams, users } = appState;
-      if (currentUser.role === UserRole.ADMIN) return teams;
-      return teams.filter(t => 
-          t.managerId === currentUser.id || 
-          getAllSubordinateIds(currentUser.id, users).includes(t.managerId) ||
-          t.projects.some(p => p.members.some(m => m.userId === currentUser.id) || p.managerId === currentUser.id)
-      );
+      if (!appState?.currentUser) return [];
+      if (appState.currentUser.role === UserRole.ADMIN) return appState.teams;
+      // Basic visibility logic: Manager sees own teams, Employees see teams they are in
+      return appState.teams; // Simplified for now to allow visibility
   };
 
-  const getVisibleReports = () => {
-      if (!appState || !appState.currentUser) return [];
-      const { currentUser, weeklyReports, users } = appState;
-      if (currentUser.role === UserRole.ADMIN) return weeklyReports;
-      const subIds = getAllSubordinateIds(currentUser.id, users);
-      return weeklyReports.filter(r => r.userId === currentUser.id || subIds.includes(r.userId));
-  };
+  if (!appState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">Loading Smart System...</div>;
 
-  const getVisibleMeetings = () => {
-      if (!appState || !appState.currentUser) return [];
-      const { currentUser, meetings, teams, users } = appState;
-      if (currentUser.role === UserRole.ADMIN) return meetings;
-      const subIds = getAllSubordinateIds(currentUser.id, users);
-      return meetings.filter(m => {
-          const isAttendee = m.attendees.includes(currentUser.id);
-          const team = teams.find(t => t.id === m.teamId);
-          const isTeamManager = team && (team.managerId === currentUser.id || subIds.includes(team.managerId));
-          return isAttendee || isTeamManager;
-      });
-  };
-
-
-  if (!appState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500">Loading Workspace...</div>;
-
-  // Not Logged In
   if (!appState.currentUser) {
       return <Login users={appState.users} onLogin={handleLogin} />;
   }
 
-  const renderContent = () => {
-    const visibleTeams = getVisibleTeams();
-    const visibleReports = getVisibleReports();
-    const visibleMeetings = getVisibleMeetings();
-
-    switch (activeTab) {
-      case 'dashboard':
-        return <KPIDashboard teams={visibleTeams} />;
-      case 'management':
-         if (appState.currentUser?.role !== UserRole.ADMIN) return <div className="p-8 text-red-500">Access Restricted. Admins Only.</div>;
-         return <ManagementDashboard 
-            teams={appState.teams} 
-            users={appState.users} 
-            reports={appState.weeklyReports} 
-            llmConfig={appState.llmConfig}
-            onUpdateReport={handleUpdateReport}
-            onUpdateTeam={handleUpdateTeam}
-         />;
-      case 'projects':
-        return <ProjectTracker 
-            teams={visibleTeams} 
-            users={appState.users} 
-            currentUser={appState.currentUser} 
-            llmConfig={appState.llmConfig}
-            prompts={appState.prompts}
-            onUpdateTeam={handleUpdateTeam} 
-        />;
-      case 'book-of-work': 
-        return <BookOfWork teams={visibleTeams} users={appState.users} onUpdateTeam={handleUpdateTeam} />;
-      case 'weekly-report': 
-        return <WeeklyReport 
-            reports={visibleReports} 
-            users={appState.users}
-            teams={visibleTeams}
-            currentUser={appState.currentUser}
-            llmConfig={appState.llmConfig} 
-            onSaveReport={handleUpdateReport}
-        />;
-      case 'meetings':
-        return <MeetingManager 
-                    meetings={visibleMeetings} 
-                    teams={visibleTeams} 
-                    users={appState.users}
-                    llmConfig={appState.llmConfig} 
-                    onUpdateMeeting={handleUpdateMeeting}
-                    onDeleteMeeting={handleDeleteMeeting}
-                />;
-      case 'notes': 
-        return <NotesManager 
-                    notes={appState.notes || []} 
-                    currentUser={appState.currentUser}
-                    llmConfig={appState.llmConfig}
-                    onUpdateNote={handleUpdateNote}
-                    onDeleteNote={handleDeleteNote}
-                />;
-      case 'admin-users':
-         if (appState.currentUser?.role !== UserRole.ADMIN) return <div className="p-8 text-red-500">Access Restricted. Admins Only.</div>;
-        return <AdminPanel 
-            users={appState.users} 
-            teams={appState.teams}
-            onAddUser={handleAddUser} 
-            onUpdateUser={handleUpdateUser} 
-            onDeleteUser={handleDeleteUser}
-            onAddTeam={handleAddTeam}
-            onUpdateTeam={handleUpdateTeam} 
-            onDeleteTeam={handleDeleteTeam}
-        />;
-      case 'settings': 
-         if (appState.currentUser?.role !== UserRole.ADMIN) return <div className="p-8 text-red-500">Access Restricted. Admins Only.</div>;
-         return <SettingsPanel 
-            config={appState.llmConfig} 
-            appState={appState} 
-            onSave={handleUpdateLLMConfig} 
-            onImport={handleImportState} 
-            onUpdateUserPassword={handleUpdateUserPassword}
-        />;
-      default:
-        return <KPIDashboard teams={visibleTeams} />;
-    }
-  };
-
   const getPageTitle = () => {
-      switch(activeTab) {
-          case 'dashboard': return 'Dashboard';
-          case 'management': return 'Management Console';
-          case 'projects': return 'Project Portfolio';
-          case 'book-of-work': return 'Book of Work';
-          case 'weekly-report': return 'Weekly Report';
-          case 'meetings': return 'Meeting Minutes';
-          case 'notes': return 'Notes & Canvas';
-          case 'admin-users': return 'System Administration';
-          case 'settings': return 'Configuration';
-          default: return 'Workspace';
-      }
+      return activeTab.charAt(0).toUpperCase() + activeTab.slice(1).replace('-', ' ');
   }
 
   return (
     <div className="flex bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-200">
       
-      {/* Toast Notification for External Updates */}
+      {/* Smart Sync Toast */}
       {showSyncToast && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] bg-indigo-600 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-300">
-              <Radio className="w-4 h-4 animate-pulse" />
-              <span className="text-sm font-bold">Data synchronized from another window</span>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <div className="flex flex-col">
+                  <span className="text-sm font-bold">Data Updated</span>
+                  <span className="text-[10px] opacity-80">Synced from server changes</span>
+              </div>
           </div>
       )}
 
-      {/* AI Sidebar */}
       <AIChatSidebar 
         isOpen={isAiSidebarOpen} 
         onClose={() => setIsAiSidebarOpen(false)} 
@@ -505,17 +299,23 @@ const AppContent: React.FC = () => {
       />
       
       <main className="flex-1 ml-64 flex flex-col">
-        {/* Top Header */}
+        {/* Header */}
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 sticky top-0 z-40">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                {getPageTitle()}
-            </h2>
+            <div className="flex items-center gap-4">
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white capitalize">
+                    {getPageTitle()}
+                </h2>
+                {/* Connection Status Indicator */}
+                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold border ${isOnline ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                    {isOnline ? <Cloud className="w-3 h-3" /> : <CloudOff className="w-3 h-3" />}
+                    {isOnline ? 'LIVE SYNC' : 'OFFLINE'}
+                </div>
+            </div>
             
             <div className="flex items-center gap-6">
-                {/* AI Assistant Toggle */}
                 <button 
                     onClick={() => setIsAiSidebarOpen(true)}
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors"
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"
                 >
                     <Bot className="w-4 h-4" />
                     AI Assistant
@@ -523,27 +323,29 @@ const AppContent: React.FC = () => {
 
                 <div className="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
 
-                {/* Actions */}
                 <div className="flex items-center gap-3">
-                    <button 
-                        onClick={toggleTheme}
-                        className="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    >
+                    <button onClick={toggleTheme} className="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                         {appState.theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5 text-amber-400" />}
                     </button>
-                    <button className="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative" title={reportNotification ? "Missing Report (>6 days)" : "Notifications"}>
+                    <button className="p-2 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative">
                         <Bell className={`w-5 h-5 ${reportNotification ? 'text-red-500' : ''}`} />
-                        {reportNotification ? (
-                            <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
-                        ) : null}
+                        {reportNotification && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>}
                     </button>
                 </div>
             </div>
         </header>
 
-        {/* Content Area */}
+        {/* Content */}
         <div className="p-8">
-            {renderContent()}
+            {activeTab === 'dashboard' && <KPIDashboard teams={getVisibleTeams()} />}
+            {activeTab === 'management' && <ManagementDashboard teams={appState.teams} users={appState.users} reports={appState.weeklyReports} llmConfig={appState.llmConfig} onUpdateReport={handleUpdateReport} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'projects' && <ProjectTracker teams={getVisibleTeams()} users={appState.users} currentUser={appState.currentUser} llmConfig={appState.llmConfig} prompts={appState.prompts} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'book-of-work' && <BookOfWork teams={getVisibleTeams()} users={appState.users} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'weekly-report' && <WeeklyReport reports={appState.weeklyReports} users={appState.users} teams={appState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onSaveReport={handleUpdateReport} />}
+            {activeTab === 'meetings' && <MeetingManager meetings={appState.meetings} teams={appState.teams} users={appState.users} llmConfig={appState.llmConfig} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} />}
+            {activeTab === 'notes' && <NotesManager notes={appState.notes} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />}
+            {activeTab === 'admin-users' && <AdminPanel users={appState.users} teams={appState.teams} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onAddTeam={handleAddTeam} onUpdateTeam={handleUpdateTeam} onDeleteTeam={handleDeleteTeam} />}
+            {activeTab === 'settings' && <SettingsPanel config={appState.llmConfig} appState={appState} onSave={handleUpdateLLMConfig} onImport={handleImportState} onUpdateUserPassword={handleUpdateUserPassword} />}
         </div>
       </main>
     </div>

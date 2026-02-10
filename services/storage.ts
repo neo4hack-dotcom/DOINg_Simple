@@ -1,13 +1,9 @@
 
-
 import { User, Team, Meeting, UserRole, TaskStatus, TaskPriority, ProjectStatus, ProjectRole, ActionItemStatus, AppState, LLMConfig, WeeklyReport, Note } from '../types';
 
-const STORAGE_KEY = 'teamsync_data_v15'; // Version bumped for robustness
-const CHANNEL_NAME = 'teamsync_broadcast_channel';
-const SERVER_URL = 'http://localhost:3001/api/data';
-
-// Channel for cross-tab synchronization
-const syncChannel = new BroadcastChannel(CHANNEL_NAME);
+const STORAGE_KEY = 'teamsync_data_v15';
+// L'URL relative permet de fonctionner quel que soit le nom de domaine ou l'IP du serveur
+const API_URL = '/api/data'; 
 
 const DEFAULT_LLM_CONFIG: LLMConfig = {
     provider: 'ollama',
@@ -15,7 +11,6 @@ const DEFAULT_LLM_CONFIG: LLMConfig = {
     model: 'llama3'
 };
 
-// --- INITIAL MINIMAL DATA ---
 const INITIAL_ADMIN: User = { 
     id: 'u1', 
     uid: 'Admin', 
@@ -27,46 +22,34 @@ const INITIAL_ADMIN: User = {
     password: '59565956' 
 };
 
-// --- ROBUST ID GENERATOR (Windows/Offline safe) ---
+// --- Générateur d'ID Robuste ---
 export const generateId = (): string => {
-    // Try native crypto if available (Secure Context)
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
     }
-    // Fallback for older browsers or non-secure contexts (file://)
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
 };
 
+// --- Lecture Locale (Cache Rapide) ---
 export const loadState = (): AppState => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      
+      // Ensure defaults
       if (!parsed.llmConfig) parsed.llmConfig = DEFAULT_LLM_CONFIG;
       if (!parsed.weeklyReports) parsed.weeklyReports = [];
       if (!parsed.notes) parsed.notes = []; 
-      if (!parsed.prompts) parsed.prompts = {};
-      
-      // User Migration & Security Check
-      if (parsed.users) {
-          parsed.users = parsed.users.map((u: User) => {
-              // Ensure Admin always exists with correct creds
-              if (u.uid === 'Admin' || u.uid === 'ADM001') {
-                  return { ...u, firstName: 'Mathieu', uid: 'Admin', password: '59565956', role: UserRole.ADMIN };
-              }
-              return { ...u, password: u.password || '1234' }
-          });
-      }
       return parsed;
     }
   } catch (error) {
-    console.error("Failed to load state. Reseting to default.", error);
+    console.error("Local load failed", error);
   }
   
+  // Default State
   return {
     users: [INITIAL_ADMIN],
     teams: [],
@@ -81,29 +64,24 @@ export const loadState = (): AppState => {
   };
 };
 
+// --- Lecture Serveur (Fichier Central) ---
 export const fetchFromServer = async (): Promise<AppState | null> => {
     try {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 2000); // 2s timeout
-        
-        const response = await fetch(SERVER_URL, { signal: controller.signal });
-        clearTimeout(id);
-        
+        const response = await fetch(API_URL);
         if (response.ok) {
             const data = await response.json();
-            if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+            // Basic validation
+            if (data && (data.users || data.teams)) {
                 return data as AppState;
             }
         }
     } catch (e) {
-        // console.debug("Sync server unavailable");
+        console.warn("Mode Hors-Ligne: Impossible de joindre le fichier central.");
     }
     return null;
 };
 
-// Atomic Update Function
-// This reads the *latest* state from disk, applies the change, and saves it back.
-// It prevents "Stale State" overwrites when multiple actions happen quickly.
+// --- Écriture Centralisée ---
 export const updateAppState = (updater: (currentState: AppState) => AppState): AppState => {
     const latestState = loadState();
     const newState = updater(latestState);
@@ -113,60 +91,46 @@ export const updateAppState = (updater: (currentState: AppState) => AppState): A
 
 export const saveState = (state: AppState) => {
   try {
-    // Add timestamp for sync
-    const stateWithTimestamp = { ...state, lastUpdated: Date.now() };
-    const serialized = JSON.stringify(stateWithTimestamp);
+    const timestamp = Date.now();
+    const stateWithTimestamp = { ...state, lastUpdated: timestamp };
     
-    localStorage.setItem(STORAGE_KEY, serialized);
+    // 1. Sauvegarde Locale (Instantané)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateWithTimestamp));
     
-    // Notify other tabs/windows about the update
-    syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
-
-    // Push to server (background)
-    fetch(SERVER_URL, {
+    // 2. Sauvegarde Serveur (Asynchrone / Fichier Central)
+    fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: serialized
-    }).catch(() => { /* Silent fail if offline */ });
+        body: JSON.stringify(stateWithTimestamp)
+    }).catch(err => console.error("Échec sauvegarde serveur:", err));
+
+    // 3. Notification inter-onglets
+    const event = new StorageEvent('storage', {
+        key: STORAGE_KEY,
+        newValue: JSON.stringify(stateWithTimestamp)
+    });
+    window.dispatchEvent(event);
     
   } catch (e: any) {
-    // Windows LocalStorage Quota Management
-    if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
-        alert("⚠️ CRITICAL STORAGE ERROR\n\nWindows LocalStorage is full (Limit: ~5-10MB).\n\nAction required:\n1. Delete old Notes containing images.\n2. Export your data in Settings > Backup.\n3. Clear data and re-import only necessary items.");
-    } else {
-        console.error("Failed to save state", e);
+    console.error("Erreur de sauvegarde", e);
+    if (e.name === 'QuotaExceededError') {
+        alert("⚠️ Mémoire Locale Pleine. Veuillez nettoyer vos Notes ou exporter vos données.");
     }
   }
 };
 
-// Subscribe to external updates (Multi-tab support)
+// --- Abonnement aux mises à jour ---
 export const subscribeToStoreUpdates = (callback: () => void) => {
-    // 1. Listen to BroadcastChannel (Modern browsers)
-    const channelHandler = (event: MessageEvent) => {
-        if (event.data.type === 'STATE_UPDATED') {
-            callback();
-        }
-    };
-    syncChannel.addEventListener('message', channelHandler);
-
-    // 2. Listen to StorageEvent (Fallback and different storage contexts)
-    const storageHandler = (event: StorageEvent) => {
+    const handler = (event: StorageEvent) => {
         if (event.key === STORAGE_KEY) {
             callback();
         }
     };
-    window.addEventListener('storage', storageHandler);
-
-    // Unsubscribe function
-    return () => {
-        syncChannel.removeEventListener('message', channelHandler);
-        window.removeEventListener('storage', storageHandler);
-    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
 };
 
 export const clearState = () => {
     localStorage.removeItem(STORAGE_KEY);
-    // Notify others to clear/reload
-    syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
     window.location.reload();
 }

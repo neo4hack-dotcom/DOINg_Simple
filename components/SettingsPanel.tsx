@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, LLMConfig, LLMProvider, User, UserRole } from '../types';
 import { fetchOllamaModels, DEFAULT_PROMPTS, testConnection } from '../services/llmService';
 import { clearState } from '../services/storage';
-import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle } from 'lucide-react';
+import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle, Merge } from 'lucide-react';
 
 interface SettingsPanelProps {
   config: LLMConfig;
@@ -21,7 +22,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [activeTab, setActiveTab] = useState<'general' | 'prompts'>('general');
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<'overwrite' | 'merge'>('overwrite');
 
   // User Password Management State
   const [selectedUserId, setSelectedUserId] = useState<string>('');
@@ -105,7 +108,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
     URL.revokeObjectURL(url);
   };
 
-  const handleImportClick = () => {
+  const handleImportClick = (mode: 'overwrite' | 'merge') => {
+      setImportMode(mode);
       fileInputRef.current?.click();
   }
 
@@ -125,7 +129,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                   // Check if it's the new Meta+Data format
                   if (parsedJson.meta && parsedJson.meta.appName === 'DOINg' && parsedJson.data) {
                       stateToImport = parsedJson.data;
-                      console.log(`Importing backup from ${parsedJson.meta.exportDate} (v${parsedJson.meta.version})`);
                   } 
                   // Check if it's the legacy raw format (Direct AppState)
                   else if (parsedJson.users && parsedJson.teams) {
@@ -133,9 +136,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                   }
 
                   if (stateToImport) {
-                      const itemCount = (stateToImport.users?.length || 0) + (stateToImport.teams?.length || 0) + (stateToImport.notes?.length || 0);
-                      if (window.confirm(`Valid backup file found.\nThis will overwrite current data with ${itemCount} items.\n\nAre you sure you want to proceed?`)) {
-                          onImport(stateToImport);
+                      if (importMode === 'overwrite') {
+                          const itemCount = (stateToImport.users?.length || 0) + (stateToImport.teams?.length || 0) + (stateToImport.notes?.length || 0);
+                          if (window.confirm(`⚠️ RESTORE BACKUP\n\nThis will OVERWRITE your current data with ${itemCount} items from the file.\n\nAre you sure?`)) {
+                              onImport(stateToImport);
+                          }
+                      } else {
+                          // MERGE MODE
+                          if (!appState) return;
+                          handleMergeState(appState, stateToImport);
                       }
                   } else {
                       alert("Invalid file format. Please upload a valid DOINg backup JSON.");
@@ -150,6 +159,93 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
       // Reset input
       event.target.value = '';
   }
+
+  const handleMergeState = (current: AppState, incoming: AppState) => {
+      // Logic to merge incoming into current
+      // 1. Users: Add new users, update existing if needed (by ID)
+      const mergedUsers = [...current.users];
+      incoming.users.forEach(incUser => {
+          const idx = mergedUsers.findIndex(u => u.id === incUser.id);
+          if (idx === -1) {
+              mergedUsers.push(incUser);
+          } else {
+              // Update existing user info (optional, maybe keep local?)
+              // For now, let's keep local user data preference unless we really want to sync attributes
+              // But let's assume incoming might have updated info
+              // mergedUsers[idx] = incUser; 
+          }
+      });
+
+      // 2. Teams & Projects
+      const mergedTeams = [...current.teams];
+      incoming.teams.forEach(incTeam => {
+          const existingTeam = mergedTeams.find(t => t.id === incTeam.id);
+          if (existingTeam) {
+              // Merge Projects inside team
+              const mergedProjects = [...existingTeam.projects];
+              incTeam.projects.forEach(incProj => {
+                  const pIdx = mergedProjects.findIndex(p => p.id === incProj.id);
+                  if (pIdx === -1) {
+                      mergedProjects.push(incProj);
+                  } else {
+                      // Overwrite project with incoming version (assuming incoming is newer/authoritative)
+                      mergedProjects[pIdx] = incProj;
+                  }
+              });
+              existingTeam.projects = mergedProjects;
+          } else {
+              mergedTeams.push(incTeam);
+          }
+      });
+
+      // 3. Weekly Reports
+      const mergedReports = [...current.weeklyReports];
+      incoming.weeklyReports.forEach(incRep => {
+          const idx = mergedReports.findIndex(r => r.id === incRep.id);
+          if (idx === -1) {
+              mergedReports.push(incRep);
+          } else {
+              // Overwrite report
+              mergedReports[idx] = incRep;
+          }
+      });
+
+      // 4. Notes
+      const mergedNotes = [...(current.notes || [])];
+      (incoming.notes || []).forEach(incNote => {
+          const idx = mergedNotes.findIndex(n => n.id === incNote.id);
+          if (idx === -1) {
+              mergedNotes.push(incNote);
+          } else {
+              mergedNotes[idx] = incNote;
+          }
+      });
+
+      // 5. Meetings
+      const mergedMeetings = [...(current.meetings || [])];
+      (incoming.meetings || []).forEach(incMeeting => {
+          const idx = mergedMeetings.findIndex(m => m.id === incMeeting.id);
+          if (idx === -1) {
+              mergedMeetings.push(incMeeting);
+          } else {
+              mergedMeetings[idx] = incMeeting;
+          }
+      });
+
+      const finalState: AppState = {
+          ...current,
+          users: mergedUsers,
+          teams: mergedTeams,
+          weeklyReports: mergedReports,
+          notes: mergedNotes,
+          meetings: mergedMeetings,
+          lastUpdated: Date.now()
+      };
+
+      if (window.confirm(`MERGE DATA\n\nSuccessfully prepared merge:\n- Users: ${mergedUsers.length}\n- Teams: ${mergedTeams.length}\n- Reports: ${mergedReports.length}\n\nApply changes?`)) {
+          onImport(finalState);
+      }
+  };
 
   const handleResetApp = () => {
       if (window.confirm("DANGER: This will permanently delete ALL data (Users, Projects, Notes, etc.) and reset the application to its initial state. This action cannot be undone.\n\nAre you absolutely sure?")) {
@@ -294,44 +390,63 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
             <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                     <Database className="w-5 h-5 text-indigo-500" />
-                    Data Management
+                    Data Management (Offline Mode)
                 </h3>
-                <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border border-slate-100 dark:border-slate-700/50 flex flex-col space-y-4">
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border border-slate-100 dark:border-slate-700/50 flex flex-col space-y-6">
                     
-                    <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+                    {/* EXPORT */}
+                    <div className="flex flex-col md:flex-row gap-4 justify-between items-center pb-6 border-b border-slate-200 dark:border-slate-700">
                         <div className="text-sm text-slate-600 dark:text-slate-400">
                             <p className="font-semibold mb-1 flex items-center gap-2 text-indigo-900 dark:text-indigo-300">
-                                <FileJson className="w-4 h-4"/> Backup & Restore
+                                <FileJson className="w-4 h-4"/> 1. Export Data
                             </p>
-                            <p>Full database export in structured JSON format.</p>
+                            <p>Generate a full backup JSON file. Send this file to your manager or keep it as backup.</p>
                         </div>
-                        <div className="flex gap-3">
+                        <button 
+                            onClick={handleExport}
+                            className="flex items-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg transition-colors font-medium text-sm shadow-sm"
+                        >
+                            <Download className="w-4 h-4 mr-2" />
+                            Export Data
+                        </button>
+                    </div>
+
+                    <input 
+                        type="file" 
+                        accept=".json" 
+                        ref={fileInputRef} 
+                        style={{display: 'none'}} 
+                        onChange={handleFileChange}
+                    />
+
+                    {/* IMPORT / MERGE */}
+                    <div className="flex flex-col gap-4">
+                         <div className="text-sm text-slate-600 dark:text-slate-400">
+                            <p className="font-semibold mb-1 flex items-center gap-2 text-indigo-900 dark:text-indigo-300">
+                                <Upload className="w-4 h-4"/> 2. Import / Merge
+                            </p>
+                            <p>Load data from a file. You can either merge it (recommended for Managers) or overwrite everything (Restore).</p>
+                        </div>
+                        <div className="flex gap-4">
                             <button 
-                                onClick={handleExport}
-                                className="flex items-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg transition-colors font-medium text-sm shadow-sm"
+                                onClick={() => handleImportClick('merge')}
+                                className="flex-1 flex items-center justify-center px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-bold text-sm shadow-sm"
                             >
-                                <Download className="w-4 h-4 mr-2" />
-                                Export JSON
+                                <Merge className="w-4 h-4 mr-2" />
+                                Merge Team Data (Smart Import)
                             </button>
-                            <input 
-                                type="file" 
-                                accept=".json" 
-                                ref={fileInputRef} 
-                                style={{display: 'none'}} 
-                                onChange={handleFileChange}
-                            />
                             <button 
-                                onClick={handleImportClick}
-                                className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium text-sm shadow-sm"
+                                onClick={() => handleImportClick('overwrite')}
+                                className="flex-1 flex items-center justify-center px-4 py-3 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg transition-colors font-medium text-sm shadow-sm"
                             >
-                                <Upload className="w-4 h-4 mr-2" />
-                                Import JSON
+                                <RefreshCw className="w-4 h-4 mr-2" />
+                                Restore Backup (Overwrite All)
                             </button>
                         </div>
                     </div>
 
                     {/* Danger Zone: Reset App */}
-                    <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-col md:flex-row gap-4 justify-between items-center">
+                    <div className="border-t border-slate-200 dark:border-slate-700 pt-6 flex flex-col md:flex-row gap-4 justify-between items-center mt-4">
                         <div className="text-sm text-slate-600 dark:text-slate-400">
                             <p className="font-semibold mb-1 flex items-center gap-2 text-red-600 dark:text-red-400"><AlertOctagon className="w-4 h-4"/> Danger Zone</p>
                             <p>Permanently delete all data and reset application.</p>

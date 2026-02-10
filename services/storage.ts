@@ -1,8 +1,10 @@
 
+
 import { User, Team, Meeting, UserRole, TaskStatus, TaskPriority, ProjectStatus, ProjectRole, ActionItemStatus, AppState, LLMConfig, WeeklyReport, Note } from '../types';
 
 const STORAGE_KEY = 'teamsync_data_v15'; // Version bumped for robustness
 const CHANNEL_NAME = 'teamsync_broadcast_channel';
+const SERVER_URL = 'http://localhost:3001/api/data';
 
 // Channel for cross-tab synchronization
 const syncChannel = new BroadcastChannel(CHANNEL_NAME);
@@ -74,8 +76,29 @@ export const loadState = (): AppState => {
     currentUser: null, 
     theme: 'light',
     llmConfig: DEFAULT_LLM_CONFIG,
-    prompts: {}
+    prompts: {},
+    lastUpdated: Date.now()
   };
+};
+
+export const fetchFromServer = async (): Promise<AppState | null> => {
+    try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), 2000); // 2s timeout
+        
+        const response = await fetch(SERVER_URL, { signal: controller.signal });
+        clearTimeout(id);
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                return data as AppState;
+            }
+        }
+    } catch (e) {
+        // console.debug("Sync server unavailable");
+    }
+    return null;
 };
 
 // Atomic Update Function
@@ -90,11 +113,21 @@ export const updateAppState = (updater: (currentState: AppState) => AppState): A
 
 export const saveState = (state: AppState) => {
   try {
-    const serialized = JSON.stringify(state);
+    // Add timestamp for sync
+    const stateWithTimestamp = { ...state, lastUpdated: Date.now() };
+    const serialized = JSON.stringify(stateWithTimestamp);
+    
     localStorage.setItem(STORAGE_KEY, serialized);
     
     // Notify other tabs/windows about the update
     syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
+
+    // Push to server (background)
+    fetch(SERVER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: serialized
+    }).catch(() => { /* Silent fail if offline */ });
     
   } catch (e: any) {
     // Windows LocalStorage Quota Management

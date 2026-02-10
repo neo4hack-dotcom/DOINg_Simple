@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { Lock, User as UserIcon, ArrowRight } from 'lucide-react';
+import { fetchFromServer, loadState, saveState } from '../services/storage';
+import { Lock, User as UserIcon, ArrowRight, RefreshCw } from 'lucide-react';
 
 interface LoginProps {
   users: User[];
@@ -12,6 +14,25 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
   const [uid, setUid] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync data on mount
+  useEffect(() => {
+    const sync = async () => {
+        setIsSyncing(true);
+        const serverData = await fetchFromServer();
+        if (serverData) {
+             const local = loadState();
+             // If server has data and (local is empty OR server is newer)
+             if (!local || (serverData.lastUpdated || 0) > (local.lastUpdated || 0)) {
+                 console.log("Syncing data from server...");
+                 saveState(serverData); // Triggers App reload via broadcast
+             }
+        }
+        setIsSyncing(false);
+    };
+    sync();
+  }, []);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +53,14 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
     <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex items-center justify-center p-4 fallback-container">
       
       {/* "fallback-card" ensures white box with shadow */}
-      <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 p-10 fallback-card">
+      <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 p-10 fallback-card relative overflow-hidden">
         
+        {isSyncing && (
+            <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 dark:bg-indigo-900 overflow-hidden">
+                 <div className="h-full bg-indigo-500 animate-progress w-full origin-left-right"></div>
+            </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col items-center mb-10">
           <div className="w-14 h-14 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-indigo-200 dark:shadow-none shadow-lg">
@@ -41,6 +68,7 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">DOINg</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">Reporting Management System</p>
+          {isSyncing && <p className="text-xs text-indigo-500 mt-2 flex items-center"><RefreshCw className="w-3 h-3 mr-1 animate-spin"/> Syncing...</p>}
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6">
@@ -101,7 +129,8 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
           {/* Submit Button */}
           <button 
             type="submit"
-            className="fallback-btn group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md hover:shadow-lg"
+            disabled={isSyncing}
+            className="fallback-btn group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
           >
             Se connecter
             <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />

@@ -1,4 +1,5 @@
 
+
 export enum UserRole {
   ADMIN = 'Admin',
   MANAGER = 'Manager',
@@ -184,8 +185,8 @@ export interface Note {
   title: string;
   createdAt: string;
   updatedAt: string;
-  isArchived: boolean;
-  blocks: NoteBlock[];
+  isArchived: boolean; 
+  blocks: NoteBlock[]; 
 }
 
 export interface AppState {
@@ -193,9 +194,10 @@ export interface AppState {
   teams: Team[];
   meetings: Meeting[];
   weeklyReports: WeeklyReport[];
-  notes: Note[]; 
+  notes: Note[];
   currentUser: User | null;
   theme: 'light' | 'dark';
   llmConfig: LLMConfig;
-  prompts?: Record<string, string>; // New: Custom prompt templates
+  prompts?: Record<string, string>;
+  lastUpdated?: number; // Sync Timestamp
 }

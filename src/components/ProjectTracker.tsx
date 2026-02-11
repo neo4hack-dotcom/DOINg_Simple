@@ -6,7 +6,7 @@ import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -525,7 +525,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* ... (Project Edit Modal - No changes) ... */}
+      {/* ... (Project Edit Modal) ... */}
       {editingProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col max-h-[90vh]">
@@ -631,26 +631,33 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                       </div>
 
-                      {/* AI Context Fields */}
-                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
-                          <label className="block text-sm font-bold text-indigo-700 dark:text-indigo-400 mb-2 flex items-center">
-                              <Sparkles className="w-4 h-4 mr-2" />
-                              AI Context Layers (Hidden & Optional)
-                          </label>
-                          <p className="text-xs text-slate-500 mb-3">
-                              These fields are hidden from the main view but used by the AI to understand the project better (e.g., technical debt details, political context, client specificities).
-                          </p>
-                          <div className="space-y-3">
-                              {[0, 1, 2].map(i => (
+                      {/* AI Context Fields (REVISED) */}
+                      <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-5 rounded-xl border border-indigo-100 dark:border-indigo-800 space-y-4">
+                          <div className="flex items-center gap-2 mb-2">
+                              <BrainCircuit className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                              <div>
+                                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">LLM Context Injection</h4>
+                                  <p className="text-xs text-indigo-600 dark:text-indigo-400 opacity-80">
+                                      Data entered here is invisible to the team but used by the AI to generate accurate reports.
+                                  </p>
+                              </div>
+                          </div>
+
+                          <div className="space-y-4">
+                              {[
+                                  { label: "1. Strategic Context", placeholder: "e.g. This project is critical for the Q4 IPO..." },
+                                  { label: "2. Technical Constraints", placeholder: "e.g. Must use Legacy API, heavily relying on AWS..." },
+                                  { label: "3. Team & Risks", placeholder: "e.g. Team is junior, external dependency on Vendor X is risky..." }
+                              ].map((layer, i) => (
                                   <div key={i}>
-                                      <label className="text-[10px] uppercase font-semibold text-slate-400 mb-1">Context Layer {i+1}</label>
-                                      <textarea 
+                                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">{layer.label}</label>
+                                      <textarea
                                           value={(editingProject.additionalDescriptions && editingProject.additionalDescriptions[i]) || ''}
                                           onChange={e => updateAdditionalDescription(i, e.target.value)}
                                           maxLength={2000}
                                           rows={2}
-                                          className="w-full p-2 text-sm border border-slate-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 focus:ring-1 focus:ring-indigo-500"
-                                          placeholder={`Add private context for AI... (Max 2000 chars)`}
+                                          className="w-full p-3 text-sm border border-indigo-100 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow text-slate-800 dark:text-slate-200"
+                                          placeholder={layer.placeholder}
                                       />
                                   </div>
                               ))}

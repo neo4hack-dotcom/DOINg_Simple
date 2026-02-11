@@ -113,7 +113,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
         description: 'New Item',
         ownerId: users[0]?.id || '',
         dueDate: new Date().toISOString().split('T')[0],
-        status: ActionItemStatus.OPEN
+        status: ActionItemStatus.TO_START
     };
     setEditMeeting({
         ...editMeeting,
@@ -492,8 +492,8 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                                                     onChange={e => updateActionItem(idx, 'status', e.target.value as ActionItemStatus)}
                                                     className={`
                                                         text-xs font-bold px-2 py-1 rounded-md border-0 ring-1 ring-inset cursor-pointer
-                                                        ${item.status === ActionItemStatus.COMPLETED ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 ring-emerald-600/20' : 
-                                                          item.status === ActionItemStatus.IN_PROGRESS ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 ring-blue-600/20' : 
+                                                        ${item.status === ActionItemStatus.DONE ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 ring-emerald-600/20' : 
+                                                          item.status === ActionItemStatus.ONGOING ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 ring-blue-600/20' : 
                                                           'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 ring-slate-500/10'}
                                                     `}
                                                 >

@@ -11,9 +11,10 @@ import ManagementDashboard from './components/ManagementDashboard';
 import Login from './components/Login'; 
 import AIChatSidebar from './components/AIChatSidebar';
 import NotesManager from './components/NotesManager'; 
+import WorkingGroupModule from './components/WorkingGroup';
 
 import { loadState, saveState, subscribeToStoreUpdates, updateAppState, fetchFromServer } from './services/storage';
-import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note } from './types';
+import { AppState, User, Team, UserRole, Meeting, LLMConfig, WeeklyReport as WeeklyReportType, ProjectRole, Note, WorkingGroup } from './types';
 import { Search, Bell, Sun, Moon, Bot, AlertTriangle, RefreshCw, Radio, Cloud, CloudOff } from 'lucide-react';
 
 interface ErrorBoundaryProps {
@@ -27,7 +28,7 @@ interface ErrorBoundaryState {
 
 // --- Error Boundary ---
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
+  public state: ErrorBoundaryState = {
     hasError: false,
     error: null
   };
@@ -81,7 +82,11 @@ const getSubordinateIds = (rootId: string, allUsers: User[]): string[] => {
 const getFilteredState = (state: AppState): AppState => {
     // 1. If Admin, see everything
     if (!state.currentUser || state.currentUser.role === UserRole.ADMIN) {
-        return state;
+        // Ensure defaults even for admin to prevent crashes
+        return {
+            ...state,
+            workingGroups: state.workingGroups || [] 
+        };
     }
 
     const myId = state.currentUser.id;
@@ -97,9 +102,22 @@ const getFilteredState = (state: AppState): AppState => {
     // I can see reports from myself or anyone below me
     const filteredReports = state.weeklyReports.filter(r => accessibleUserIds.includes(r.userId));
 
-    // --- FILTER REPORTS ---
-    // I can see notes created by myself or anyone below me
+    // --- FILTER NOTES ---
     const filteredNotes = state.notes.filter(n => accessibleUserIds.includes(n.userId));
+
+    // --- FILTER WORKING GROUPS ---
+    const filteredGroups = (state.workingGroups || []).filter(g => 
+        g.memberIds.includes(myId) || // I am member
+        state.teams.some(t => // Or linked to a project I manage/member
+            t.projects.some(p => 
+                p.id === g.projectId && (
+                    p.managerId === myId || 
+                    p.members.some(m => m.userId === myId) ||
+                    t.managerId === myId
+                )
+            )
+        )
+    );
 
     // --- FILTER MEETINGS ---
     // I can see meetings where I (or a subordinate) am an attendee OR an action owner
@@ -112,10 +130,6 @@ const getFilteredState = (state: AppState): AppState => {
     });
 
     // --- FILTER TEAMS & PROJECTS (Complex) ---
-    // Rule:
-    // 1. I see the Team if I manage it OR if it contains a visible project.
-    // 2. I see a Project if I (or subordinate) manage it OR am a member.
-    
     const filteredTeams = state.teams.map(team => {
         // Filter projects first
         const visibleProjects = team.projects.filter(p => {
@@ -127,17 +141,8 @@ const getFilteredState = (state: AppState): AppState => {
         const iManageTeam = accessibleUserIds.includes(team.managerId);
 
         if (iManageTeam) {
-            // If I manage the team, I usually see everything in it.
-            // But strict rule: "only what they created/lead or below them".
-            // Let's assume Team Manager sees all projects in that team for simplicity, 
-            // OR strictly apply the rule. Let's strictly apply the project rule + ensure all projects created by subordinates are seen.
-            // If I manage the team, I should see the team container at least.
-            // Let's return the team with ALL projects if I manage the team (Manager override), 
-            // otherwise only visible projects.
             return team; 
         } else if (visibleProjects.length > 0) {
-            // I don't manage the team, but I'm involved in some projects.
-            // Return team with ONLY visible projects.
             return { ...team, projects: visibleProjects };
         }
         
@@ -150,7 +155,8 @@ const getFilteredState = (state: AppState): AppState => {
         teams: filteredTeams,
         weeklyReports: filteredReports,
         meetings: filteredMeetings,
-        notes: filteredNotes
+        notes: filteredNotes,
+        workingGroups: filteredGroups
     };
 };
 
@@ -300,9 +306,6 @@ const AppContent: React.FC = () => {
   }
 
   // --- HANDLERS ---
-  // IMPORTANT: Handlers must update the GLOBAL state (appState), not the filtered viewState.
-  // We use createHandler to wrap the logic.
-
   const createHandler = <T,>(updater: (current: AppState, payload: T) => AppState) => {
       return (payload: T) => {
           const newState = updateAppState(curr => updater(curr, payload));
@@ -314,33 +317,20 @@ const AppContent: React.FC = () => {
   const handleAddUser = createHandler((curr, u: User) => ({...curr, users: [...curr.users, u]}));
   const handleDeleteUser = createHandler((curr, id: string) => ({...curr, users: curr.users.filter(u => u.id !== id)}));
   
-  // SMART TEAM UPDATE: Handles merging of visible projects with hidden projects
   const handleUpdateTeam = (updatedTeamFromUI: Team) => {
       const newState = updateAppState(curr => {
           const originalTeam = curr.teams.find(t => t.id === updatedTeamFromUI.id);
-          
           let finalTeam: Team;
-
           if (!originalTeam) {
-              // New team, just add it
               finalTeam = updatedTeamFromUI;
               return { ...curr, teams: [...curr.teams, finalTeam] };
           } else {
-              // Existing team. We must merge projects because the UI might only have a partial list.
-              
-              // 1. Get IDs of projects currently visible in the UI (the ones being saved)
               const visibleProjectIds = updatedTeamFromUI.projects.map(p => p.id);
-              
-              // 2. Find projects in the database that are NOT in the UI (hidden from this user)
-              // These must be preserved!
               const hiddenProjects = originalTeam.projects.filter(p => !visibleProjectIds.includes(p.id));
-              
-              // 3. Merge: (UI Projects) + (Hidden Preserved Projects)
               finalTeam = {
                   ...updatedTeamFromUI,
                   projects: [...updatedTeamFromUI.projects, ...hiddenProjects]
               };
-
               return {
                   ...curr,
                   teams: curr.teams.map(t => t.id === finalTeam.id ? finalTeam : t)
@@ -376,6 +366,16 @@ const AppContent: React.FC = () => {
   });
   const handleDeleteNote = createHandler((curr, id: string) => ({...curr, notes: curr.notes.filter(n => n.id !== id)}));
 
+  const handleUpdateGroup = createHandler((curr, g: WorkingGroup) => {
+      // Ensure workingGroups exists before map/find
+      const groups = curr.workingGroups || [];
+      const idx = groups.findIndex(grp => grp.id === g.id);
+      const newGroups = [...groups];
+      if (idx >= 0) newGroups[idx] = g; else newGroups.push(g);
+      return {...curr, workingGroups: newGroups};
+  });
+  const handleDeleteGroup = createHandler((curr, id: string) => ({...curr, workingGroups: (curr.workingGroups || []).filter(g => g.id !== id)}));
+
   const handleUpdateLLMConfig = (config: LLMConfig, prompts?: Record<string, string>) => {
       const newState = updateAppState(curr => ({...curr, llmConfig: config, prompts: prompts || curr.prompts}));
       setAppState(newState);
@@ -407,7 +407,6 @@ const AppContent: React.FC = () => {
       return activeTab.charAt(0).toUpperCase() + activeTab.slice(1).replace('-', ' ');
   }
 
-  // Use viewState for rendering to respect permissions
   return (
     <div className="flex bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-200">
       
@@ -479,6 +478,7 @@ const AppContent: React.FC = () => {
             {activeTab === 'management' && <ManagementDashboard teams={viewState.teams} users={viewState.users} reports={viewState.weeklyReports} llmConfig={appState.llmConfig} onUpdateReport={handleUpdateReport} onUpdateTeam={handleUpdateTeam} />}
             {activeTab === 'projects' && <ProjectTracker teams={viewState.teams} users={viewState.users} currentUser={appState.currentUser} llmConfig={appState.llmConfig} prompts={appState.prompts} onUpdateTeam={handleUpdateTeam} />}
             {activeTab === 'book-of-work' && <BookOfWork teams={viewState.teams} users={viewState.users} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'working-groups' && <WorkingGroupModule groups={viewState.workingGroups || []} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup} />}
             {activeTab === 'weekly-report' && <WeeklyReport reports={viewState.weeklyReports} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onSaveReport={handleUpdateReport} />}
             {activeTab === 'meetings' && <MeetingManager meetings={viewState.meetings} teams={viewState.teams} users={viewState.users} llmConfig={appState.llmConfig} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} />}
             {activeTab === 'notes' && <NotesManager notes={viewState.notes} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />}

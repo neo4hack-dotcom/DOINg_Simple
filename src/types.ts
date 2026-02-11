@@ -41,12 +41,13 @@ export enum ProjectRole {
 }
 
 export enum ActionItemStatus {
-  OPEN = 'Open',
-  IN_PROGRESS = 'In Progress',
-  COMPLETED = 'Completed'
+  TO_START = 'To Start',
+  ONGOING = 'Ongoing',
+  BLOCKED = 'Blocked',
+  DONE = 'Done'
 }
 
-export type LLMProvider = 'ollama' | 'local_http';
+export type LLMProvider = 'ollama' | 'local_http' | 'n8n';
 
 export interface LLMConfig {
   provider: LLMProvider;
@@ -97,7 +98,7 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   assigneeId?: string; 
-  eta: string; 
+  eta: string; // ISO Date String YYYY-MM-DD
   dependencies?: string[]; // Internal dependencies (Task IDs)
   externalDependencies?: ExternalDependency[]; // New: External systems/people
   actions?: TaskAction[]; // New: Sub-actions with statuses
@@ -154,6 +155,9 @@ export interface ActionItem {
   ownerId: string;
   dueDate: string;
   status: ActionItemStatus;
+  eta?: string;
+  category?: string; // New: Family/Category of the action
+  priority?: TaskPriority; // New: Criticality
 }
 
 export type HealthStatus = 'Green' | 'Amber' | 'Red'; 
@@ -200,12 +204,40 @@ export interface Note {
   blocks: NoteBlock[]; 
 }
 
+// --- WORKING GROUP TYPES ---
+
+export interface WorkingGroupChecklistItem {
+    id: string;
+    text: string;
+    isUrgent: boolean;
+    comment: string;
+    done: boolean;
+}
+
+export interface WorkingGroupSession {
+  id: string;
+  date: string;
+  notes: string;
+  actionItems: ActionItem[];
+  checklist?: WorkingGroupChecklistItem[]; // New Checklist feature
+}
+
+export interface WorkingGroup {
+  id: string;
+  title: string;
+  projectId?: string; // Linked project (Optional)
+  memberIds: string[]; // Who is part of this group
+  sessions: WorkingGroupSession[];
+  archived: boolean;
+}
+
 export interface AppState {
   users: User[];
   teams: Team[];
   meetings: Meeting[];
   weeklyReports: WeeklyReport[];
   notes: Note[];
+  workingGroups: WorkingGroup[]; // New module
   currentUser: User | null;
   theme: 'light' | 'dark';
   llmConfig: LLMConfig;

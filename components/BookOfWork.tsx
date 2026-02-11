@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Team, User, Project, ProjectStatus, ProjectRole, Team as TeamType, ExternalDependency } from '../types';
-import { Search, ExternalLink, Link as LinkIcon, Users, Network, Calendar, ChevronDown, ChevronRight, LayoutGrid, List, Plus, X, Save, Trash2, Sparkles, Link2 } from 'lucide-react';
+import { Search, ExternalLink, Link as LinkIcon, Users, Network, Calendar, ChevronDown, ChevronRight, LayoutGrid, List, Plus, X, Save, Trash2, Sparkles, Link2, ArrowUpDown } from 'lucide-react';
 
 interface BookOfWorkProps {
     teams: Team[];
@@ -12,6 +12,7 @@ interface BookOfWorkProps {
 const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) => {
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
     const [searchTerm, setSearchTerm] = useState('');
+    const [sortBy, setSortBy] = useState<'name' | 'deadline' | 'status' | 'team'>('name');
     const [editingProject, setEditingProject] = useState<{project: Project, teamId: string} | null>(null);
     const [isNewProject, setIsNewProject] = useState(false);
 
@@ -39,12 +40,20 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
     // Flatten all projects for display
     const allProjects = teams.flatMap(t => t.projects.map(p => ({ ...p, teamName: t.name, teamId: t.id })));
     
-    // Filter
-    const filteredProjects = allProjects.filter(p => 
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        p.teamName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.description.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // Filter & Sort
+    const filteredProjects = allProjects
+        .filter(p => 
+            p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            p.teamName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.description.toLowerCase().includes(searchTerm.toLowerCase())
+        )
+        .sort((a, b) => {
+            if (sortBy === 'name') return a.name.localeCompare(b.name);
+            if (sortBy === 'deadline') return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+            if (sortBy === 'status') return a.status.localeCompare(b.status);
+            if (sortBy === 'team') return a.teamName.localeCompare(b.teamName);
+            return 0;
+        });
 
     // Handle Escape Key to close modals
     useEffect(() => {
@@ -436,8 +445,8 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
 
             {/* Toolbar */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-                <div className="flex gap-4 w-full md:w-auto">
-                    <div className="relative w-full md:w-80">
+                <div className="flex gap-4 w-full md:w-auto items-center">
+                    <div className="relative w-full md:w-60">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input 
                             type="text" 
@@ -447,9 +456,26 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                             className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
                         />
                     </div>
+                    
+                    {/* Sort Dropdown */}
+                    <div className="relative">
+                        <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <select 
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as any)}
+                            className="pl-10 pr-8 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white cursor-pointer appearance-none"
+                        >
+                            <option value="name">Name (A-Z)</option>
+                            <option value="deadline">Deadline (Earliest)</option>
+                            <option value="status">Status</option>
+                            <option value="team">Team</option>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    </div>
+
                     <button 
                         onClick={handleCreateProject}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium text-sm flex items-center shadow-sm"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium text-sm flex items-center shadow-sm whitespace-nowrap"
                     >
                         <Plus className="w-4 h-4 mr-2" /> New Project
                     </button>

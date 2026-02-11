@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { Briefcase, Settings, BarChart3, LogOut, BookOpen, Layers, Library, ClipboardList, LayoutDashboard, StickyNote } from 'lucide-react';
+import { Briefcase, Settings, BarChart3, LogOut, BookOpen, Layers, Library, ClipboardList, LayoutDashboard, StickyNote, Users } from 'lucide-react';
 import { User, UserRole } from '../types';
 
 interface SidebarProps {
@@ -58,6 +59,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentUser, activeTab, onTabChange, 
         <button onClick={() => onTabChange('book-of-work')} className={navItemClass('book-of-work')}>
           <Library className="w-4 h-4 mr-3" />
           Book of Work
+        </button>
+
+        <button onClick={() => onTabChange('working-groups')} className={navItemClass('working-groups')}>
+          <Users className="w-4 h-4 mr-3" />
+          Working Groups
         </button>
         
         <button onClick={() => onTabChange('weekly-report')} className={navItemClass('weekly-report')}>

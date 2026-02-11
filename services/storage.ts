@@ -43,6 +43,7 @@ export const loadState = (): AppState => {
       if (!parsed.llmConfig) parsed.llmConfig = DEFAULT_LLM_CONFIG;
       if (!parsed.weeklyReports) parsed.weeklyReports = [];
       if (!parsed.notes) parsed.notes = []; 
+      if (!parsed.workingGroups) parsed.workingGroups = []; // Ensure workingGroups exists
       return parsed;
     }
   } catch (error) {
@@ -56,6 +57,7 @@ export const loadState = (): AppState => {
     meetings: [],
     weeklyReports: [],
     notes: [],
+    workingGroups: [],
     currentUser: null, 
     theme: 'light',
     llmConfig: DEFAULT_LLM_CONFIG,

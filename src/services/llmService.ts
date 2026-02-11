@@ -1,5 +1,5 @@
 
-import { Team, User, TaskStatus, LLMConfig, Meeting, WeeklyReport, ChatMessage, Note, Project } from "../types";
+import { Team, User, TaskStatus, LLMConfig, Meeting, WeeklyReport, ChatMessage, Note, Project, WorkingGroup, ActionItemStatus } from "../types";
 
 // --- DEFAULT PROMPTS ---
 
@@ -162,6 +162,54 @@ MANDATORY STRUCTURE:
 *   If NO risks found in data, write: "✅ No specific alerts detected based on current data."
 
 Tone: Formal, "Consulting" style. 100% Accurate. No Hallucinations.
+`,
+    working_group_full: `
+You are a Project Director analyzing the full history of a Working Group.
+Your goal is to produce a comprehensive report summarizing the group's lifecycle, decisions, and remaining work.
+
+DATA:
+{{DATA}}
+
+MANDATORY STRUCTURE:
+
+### 📑 Executive Summary
+(Overview of the working group's purpose and progress from start to now).
+
+### ✅ Key Achievements & Closed Topics
+(List major topics discussed and actions marked as DONE. Highlight solved checklist items).
+
+### 🚧 Remaining Work (The "Rest to Do")
+(List actions that are NOT Done (Ongoing, To Start, Blocked). List checklist items NOT checked).
+*   **Actions**: ...
+*   **Checklist**: ...
+
+### ⚠️ Risks & Blockers
+(Highlight any item marked as BLOCKED or URGENT).
+
+Tone: Professional, synthesis-oriented. English.
+`,
+    working_group_session: `
+You are a Project Manager Assistant. Generate a summary strictly for the LAST session of this working group.
+
+DATA:
+{{DATA}}
+
+MANDATORY STRUCTURE:
+
+### 📅 Session Recap ({{DATE}})
+(Summarize the notes of this specific session).
+
+### ⚡ Action Plan (Next Steps)
+(List ONLY actions from this session that are NOT Done).
+*   [Action] (Owner / ETA)
+
+### 📋 Checklist Status
+(List checklist items relevant to this session that are NOT Done).
+
+### 🔔 Alerts
+(If any action is BLOCKED or checklist item is URGENT).
+
+Tone: Action-oriented. English.
 `
 };
 
@@ -310,6 +358,62 @@ const prepareManagementData = (teams: Team[], reports: WeeklyReport[], users: Us
     `;
 }
 
+const prepareWorkingGroupData = (group: WorkingGroup, teams: Team[], users: User[], onlyLastSession: boolean): string => {
+    // 1. Find Linked Project Info
+    let projectContext = "";
+    if (group.projectId) {
+        for (const t of teams) {
+            const p = t.projects.find(proj => proj.id === group.projectId);
+            if (p) {
+                projectContext = `
+                LINKED PROJECT CONTEXT:
+                Name: ${p.name}
+                Status: ${p.status}
+                Description: ${p.description}
+                Deadline: ${p.deadline}
+                Context Layers: ${(p.additionalDescriptions || []).join(' ')}
+                `;
+                break;
+            }
+        }
+    }
+
+    // 2. Prepare Session Data
+    const sessionsToProcess = onlyLastSession && group.sessions.length > 0 
+        ? [group.sessions[0]] // Just the first one (assuming sorted new->old)
+        : group.sessions;
+
+    const sessionsText = sessionsToProcess.map(s => {
+        const actions = s.actionItems.map(a => {
+            const owner = users.find(u => u.id === a.ownerId)?.firstName || 'Unassigned';
+            return `- [${a.status}] ${a.description} (Owner: ${owner}, ETA: ${a.eta || 'None'})`;
+        }).join('\n');
+
+        const checklist = s.checklist ? s.checklist.map(c => {
+            return `- [${c.done ? 'DONE' : 'TODO'}] ${c.text} ${c.isUrgent ? '(URGENT)' : ''} ${c.comment ? `(Note: ${c.comment})` : ''}`;
+        }).join('\n') : 'No checklist.';
+
+        return `
+        SESSION DATE: ${s.date}
+        NOTES: ${s.notes}
+        
+        ACTIONS:
+        ${actions}
+        
+        CHECKLIST:
+        ${checklist}
+        `;
+    }).join('\n----------------------------------\n');
+
+    return `
+    WORKING GROUP: ${group.title}
+    ${projectContext}
+
+    SESSIONS HISTORY:
+    ${sessionsText}
+    `;
+}
+
 // --- Helper to inject data into template ---
 const fillTemplate = (template: string, replacements: Record<string, string>) => {
     let result = template;
@@ -386,6 +490,36 @@ const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string>
     return data.choices?.[0]?.message?.content || data.content || JSON.stringify(data);
 };
 
+const callN8n = async (prompt: string, config: LLMConfig): Promise<string> => {
+    const url = config.baseUrl;
+    if (!url) throw new Error("N8N Webhook URL is missing");
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+    if (config.apiKey) {
+        headers['Authorization'] = config.apiKey; 
+    }
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+            prompt: prompt,
+            model: config.model,
+            timestamp: new Date().toISOString()
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`N8N Webhook Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (typeof data === 'string') return data;
+    return data.output || data.text || data.response || data.content || JSON.stringify(data);
+};
+
 // --- Public API ---
 
 export const testConnection = async (config: LLMConfig): Promise<boolean> => {
@@ -396,6 +530,8 @@ export const testConnection = async (config: LLMConfig): Promise<boolean> => {
             res = await callOllama(pingPrompt, config);
         } else if (config.provider === 'local_http') {
             res = await callLocalHttp(pingPrompt, config);
+        } else if (config.provider === 'n8n') {
+            res = await callN8n(pingPrompt, config);
         }
         return !!res;
     } catch (e) {
@@ -572,6 +708,22 @@ export const generateRiskAssessment = async (teams: Team[], reports: WeeklyRepor
     return runPrompt(prompt, config);
 }
 
+export const generateWorkingGroupFullReport = async (group: WorkingGroup, teams: Team[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+    const data = prepareWorkingGroupData(group, teams, users, false);
+    const template = customPrompts?.['working_group_full'] || DEFAULT_PROMPTS.working_group_full;
+    const prompt = fillTemplate(template, { DATA: data });
+    return runPrompt(prompt, config);
+};
+
+export const generateWorkingGroupSessionReport = async (group: WorkingGroup, teams: Team[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+    const data = prepareWorkingGroupData(group, teams, users, true);
+    // Find latest date for title
+    const latestDate = group.sessions.length > 0 ? group.sessions[0].date : 'Unknown Date';
+    const template = customPrompts?.['working_group_session'] || DEFAULT_PROMPTS.working_group_session;
+    const prompt = fillTemplate(template, { DATA: data, DATE: latestDate });
+    return runPrompt(prompt, config);
+};
+
 export const generateNoteSummary = async (note: Note, includeImages: boolean, config: LLMConfig): Promise<string> => {
     const textContent = note.blocks
         .filter(b => b.type === 'text')
@@ -654,6 +806,8 @@ const runPrompt = async (prompt: string, config: LLMConfig, images: string[] = [
             return await callOllama(prompt, config, images);
           case 'local_http':
             return await callLocalHttp(prompt, config);
+          case 'n8n':
+            return await callN8n(prompt, config);
           default:
             return `Provider ${config.provider} not supported. Use Local AI only.`;
         }

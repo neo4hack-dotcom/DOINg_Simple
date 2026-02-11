@@ -27,6 +27,17 @@ const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ isOpen, onClose, llmConfi
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Handle Escape Key to close sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && isOpen) {
+            onClose();
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleSendMessage = async (isSynthesisRequest = false) => {
     if ((!input.trim() && attachedFiles.length === 0)) return;
 
@@ -132,9 +143,18 @@ const AIChatSidebar: React.FC<AIChatSidebarProps> = ({ isOpen, onClose, llmConfi
       setAttachedFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const cleanTextForClipboard = (text: string) => {
+      return text
+          .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+          .replace(/###\s?/g, '') // Remove headers
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links keeping text
+          .trim();
+  };
+
   const copyToClipboard = (text: string) => {
-      navigator.clipboard.writeText(text);
-      alert("Copied!");
+      const plainText = cleanTextForClipboard(text);
+      navigator.clipboard.writeText(plainText);
+      alert("Copied (Plain Text)!");
   }
 
   const exportToDoc = (text: string) => {

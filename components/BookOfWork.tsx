@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Team, User, Project, ProjectStatus, ProjectRole, Team as TeamType, ExternalDependency } from '../types';
 import { Search, ExternalLink, Link as LinkIcon, Users, Network, Calendar, ChevronDown, ChevronRight, LayoutGrid, List, Plus, X, Save, Trash2, Sparkles, Link2 } from 'lucide-react';
 
@@ -45,6 +45,17 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
         p.teamName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.description.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    // Handle Escape Key to close modals
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setEditingProject(null);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     const handleCreateProject = () => {
         setIsNewProject(true);

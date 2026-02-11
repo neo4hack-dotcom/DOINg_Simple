@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus, Team } from '../types';
+import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus, Team, UserRole } from '../types';
 import { generateWeeklyReportSummary, generateConsolidatedReport, generateManagerSynthesis } from '../services/llmService';
 import FormattedText from './FormattedText';
 import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive, FileText, Sparkles } from 'lucide-react';
@@ -42,6 +42,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
   };
 
   const currentMonday = getMonday(new Date());
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
   
   const [currentReport, setCurrentReport] = useState<WeeklyReportType>({
       id: '',
@@ -56,6 +57,19 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       projectHealth: 'Green',
       updatedAt: new Date().toISOString()
   });
+
+  // Handle Escape Key to close modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            setShowAutoFillModal(false);
+            setShowSummaryModal(false);
+            setShowSynthesisModal(false);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Load existing report for this week if exists on mount, but only if we are in "Current Week mode" (id is empty or matches current week logic)
   useEffect(() => {
@@ -183,13 +197,25 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       setSelectedReportIdsForFill([]);
   }
 
+  const cleanTextForClipboard = (text: string) => {
+      return text
+          .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+          .replace(/###\s?/g, '') // Remove headers
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links keeping text
+          .trim();
+  };
+
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    alert("Copied to clipboard!");
+    const plainText = cleanTextForClipboard(text);
+    navigator.clipboard.writeText(plainText);
+    alert("Copied to clipboard (Plain Text)!");
   };
 
   const exportToDoc = (text: string, filename: string) => {
       const element = document.createElement("a");
+      // For Doc export, we keep markdown/format as raw text usually handles basic structure better than stripped
+      // But let's strip it to be consistent with "Copy" if desired, or keep as is.
+      // Let's keep as is for Doc file as it might be interpreted or readable.
       const file = new Blob([text], {type: 'text/plain'});
       element.href = URL.createObjectURL(file);
       element.download = filename; 
@@ -582,8 +608,8 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                                 </button>
                             )}
 
-                             {/* Consolidation Magic Button (Admin/Manager context usually) */}
-                             {llmConfig && (
+                             {/* Consolidation Magic Button (Admin Only) */}
+                             {llmConfig && isAdmin && (
                                 <button 
                                     onClick={() => setShowAutoFillModal(true)}
                                     className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-3 py-2 rounded-lg font-medium hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors flex items-center border border-purple-200 dark:border-purple-800 text-sm"
@@ -593,7 +619,8 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                                 </button>
                             )}
                             
-                            {llmConfig && (
+                            {/* Manager Synthesis Button (Admin Only) */}
+                            {llmConfig && isAdmin && (
                                 <button 
                                     onClick={handleManagerSynthesis}
                                     className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 py-2 rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-colors flex items-center shadow-md text-sm"

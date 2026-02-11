@@ -26,14 +26,11 @@ interface ErrorBoundaryState {
 }
 
 // --- Error Boundary ---
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = {
-      hasError: false,
-      error: null
-    };
-  }
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null
+  };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -64,13 +61,105 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         </div>
       );
     }
-    return this.props.children; 
+    // Fix: Explicitly cast this.props to any to bypass TS error in some environments
+    return (this.props as any).children; 
   }
 }
+
+// --- ACCESS CONTROL UTILS ---
+
+// Recursive function to get all subordinate IDs (direct and indirect)
+const getSubordinateIds = (rootId: string, allUsers: User[]): string[] => {
+    const directs = allUsers.filter(u => u.managerId === rootId);
+    let ids = directs.map(u => u.id);
+    directs.forEach(d => {
+        ids = [...ids, ...getSubordinateIds(d.id, allUsers)];
+    });
+    return ids;
+};
+
+// Filter the AppState based on the Current User's hierarchy role
+const getFilteredState = (state: AppState): AppState => {
+    // 1. If Admin, see everything
+    if (!state.currentUser || state.currentUser.role === UserRole.ADMIN) {
+        return state;
+    }
+
+    const myId = state.currentUser.id;
+    // 2. Get list of all people under me + myself
+    const mySubordinates = getSubordinateIds(myId, state.users);
+    const accessibleUserIds = [myId, ...mySubordinates];
+
+    // --- FILTER USERS ---
+    // I can see myself and anyone below me
+    const filteredUsers = state.users.filter(u => accessibleUserIds.includes(u.id));
+
+    // --- FILTER REPORTS ---
+    // I can see reports from myself or anyone below me
+    const filteredReports = state.weeklyReports.filter(r => accessibleUserIds.includes(r.userId));
+
+    // --- FILTER REPORTS ---
+    // I can see notes created by myself or anyone below me
+    const filteredNotes = state.notes.filter(n => accessibleUserIds.includes(n.userId));
+
+    // --- FILTER MEETINGS ---
+    // I can see meetings where I (or a subordinate) am an attendee OR an action owner
+    const filteredMeetings = state.meetings.filter(m => {
+        // Is creator/attendee in my scope?
+        const hasAttendee = m.attendees.some(attId => accessibleUserIds.includes(attId));
+        // Is action owner in my scope?
+        const hasActionOwner = m.actionItems.some(ai => accessibleUserIds.includes(ai.ownerId));
+        return hasAttendee || hasActionOwner;
+    });
+
+    // --- FILTER TEAMS & PROJECTS (Complex) ---
+    // Rule:
+    // 1. I see the Team if I manage it OR if it contains a visible project.
+    // 2. I see a Project if I (or subordinate) manage it OR am a member.
+    
+    const filteredTeams = state.teams.map(team => {
+        // Filter projects first
+        const visibleProjects = team.projects.filter(p => {
+            const isManager = accessibleUserIds.includes(p.managerId || '');
+            const isMember = p.members.some(m => accessibleUserIds.includes(m.userId));
+            return isManager || isMember;
+        });
+
+        const iManageTeam = accessibleUserIds.includes(team.managerId);
+
+        if (iManageTeam) {
+            // If I manage the team, I usually see everything in it.
+            // But strict rule: "only what they created/lead or below them".
+            // Let's assume Team Manager sees all projects in that team for simplicity, 
+            // OR strictly apply the rule. Let's strictly apply the project rule + ensure all projects created by subordinates are seen.
+            // If I manage the team, I should see the team container at least.
+            // Let's return the team with ALL projects if I manage the team (Manager override), 
+            // otherwise only visible projects.
+            return team; 
+        } else if (visibleProjects.length > 0) {
+            // I don't manage the team, but I'm involved in some projects.
+            // Return team with ONLY visible projects.
+            return { ...team, projects: visibleProjects };
+        }
+        
+        return null; // Hide team completely
+    }).filter(t => t !== null) as Team[];
+
+    return {
+        ...state,
+        users: filteredUsers,
+        teams: filteredTeams,
+        weeklyReports: filteredReports,
+        meetings: filteredMeetings,
+        notes: filteredNotes
+    };
+};
+
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [appState, setAppState] = useState<AppState | null>(null);
+  const [viewState, setViewState] = useState<AppState | null>(null); // The filtered state for UI
   const [reportNotification, setReportNotification] = useState(false);
   
   // Sync Status
@@ -110,7 +199,7 @@ const AppContent: React.FC = () => {
     };
     initServerSync();
 
-    // 3. Polling Interval (Every 10 seconds check for updates from colleagues)
+    // 3. Polling Interval
     const intervalId = setInterval(async () => {
         const serverData = await fetchFromServer();
         if (serverData) {
@@ -120,21 +209,18 @@ const AppContent: React.FC = () => {
             setAppState(currentState => {
                 if (!currentState) return serverData;
                 
-                // Only update if server is strictly newer than what we have in memory
                 if ((serverData.lastUpdated || 0) > (currentState.lastUpdated || 0)) {
                     console.log("🔄 Auto-Sync: New data received from server.");
                     setShowSyncToast(true);
                     setTimeout(() => setShowSyncToast(false), 4000);
                     
-                    // CRITICAL FIX: Merge server data but PRESERVE local session state
                     const mergedState = {
                         ...serverData,
-                        currentUser: currentState.currentUser, // Keep my login
-                        theme: currentState.theme, // Keep my theme preference
-                        llmConfig: currentState.llmConfig // Keep local LLM config if wanted, or sync it. Usually config is shared but keys might be local. Let's assume shared config for now but protected user.
+                        currentUser: currentState.currentUser, 
+                        theme: currentState.theme,
+                        llmConfig: currentState.llmConfig
                     };
 
-                    // Persist to local for offline backup
                     localStorage.setItem('teamsync_data_v15', JSON.stringify(mergedState));
                     return mergedState;
                 }
@@ -143,9 +229,8 @@ const AppContent: React.FC = () => {
         } else {
             setIsOnline(false);
         }
-    }, 10000); // 10 seconds
+    }, 10000); 
 
-    // 4. Subscribe to Local Tab Updates
     const unsubscribe = subscribeToStoreUpdates(() => {
         const freshState = loadState();
         setAppState(freshState);
@@ -157,15 +242,22 @@ const AppContent: React.FC = () => {
     };
   }, []);
 
+  // Update View State whenever App State changes
+  useEffect(() => {
+      if (appState) {
+          setViewState(getFilteredState(appState));
+      }
+  }, [appState]);
+
   const applyTheme = (theme: 'light' | 'dark') => {
       if (theme === 'dark') document.documentElement.classList.add('dark');
       else document.documentElement.classList.remove('dark');
   };
 
-  // Check reports logic
+  // Check reports logic (Use ViewState to only notify about relevant reports)
   useEffect(() => {
-      if (appState && appState.currentUser) {
-          const userReports = appState.weeklyReports.filter(r => r.userId === appState.currentUser?.id);
+      if (viewState && viewState.currentUser) {
+          const userReports = viewState.weeklyReports.filter(r => r.userId === viewState.currentUser?.id);
           if (userReports.length === 0) {
               setReportNotification(true);
           } else {
@@ -174,7 +266,7 @@ const AppContent: React.FC = () => {
               setReportNotification(daysDiff > 6);
           }
       }
-  }, [appState?.weeklyReports, appState?.currentUser]);
+  }, [viewState?.weeklyReports, viewState?.currentUser]);
 
   const toggleTheme = () => {
       const newState = updateAppState(current => ({
@@ -186,25 +278,20 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogin = (user: User) => {
-      // Fetch latest data first to ensure we have latest DB state before logging in locally
       fetchFromServer().then(serverData => {
           setAppState(currentState => {
-              // Base data source: Server if available, else current Local
               const baseData = serverData || currentState;
               if (!baseData) return null;
 
               const newState = {
                   ...baseData,
-                  currentUser: user, // Set the new user locally
+                  currentUser: user,
                   lastUpdated: Date.now()
               };
-              
-              // Save to localStorage immediately so F5 works
               localStorage.setItem('teamsync_data_v15', JSON.stringify(newState));
               return newState;
           });
       });
-      
       setActiveTab('dashboard');
   }
 
@@ -213,9 +300,10 @@ const AppContent: React.FC = () => {
       window.location.reload(); 
   }
 
-  // --- Handlers Wrappers ---
-  // We use updateAppState to ensure we write to disk/server
-  
+  // --- HANDLERS ---
+  // IMPORTANT: Handlers must update the GLOBAL state (appState), not the filtered viewState.
+  // We use createHandler to wrap the logic.
+
   const createHandler = <T,>(updater: (current: AppState, payload: T) => AppState) => {
       return (payload: T) => {
           const newState = updateAppState(curr => updater(curr, payload));
@@ -227,12 +315,42 @@ const AppContent: React.FC = () => {
   const handleAddUser = createHandler((curr, u: User) => ({...curr, users: [...curr.users, u]}));
   const handleDeleteUser = createHandler((curr, id: string) => ({...curr, users: curr.users.filter(u => u.id !== id)}));
   
-  const handleUpdateTeam = createHandler((curr, t: Team) => {
-      const teams = curr.teams.map(team => team.id === t.id ? t : team);
-      // If team doesn't exist (newly created in some flows), add it
-      if (!curr.teams.find(team => team.id === t.id)) teams.push(t);
-      return {...curr, teams};
-  });
+  // SMART TEAM UPDATE: Handles merging of visible projects with hidden projects
+  const handleUpdateTeam = (updatedTeamFromUI: Team) => {
+      const newState = updateAppState(curr => {
+          const originalTeam = curr.teams.find(t => t.id === updatedTeamFromUI.id);
+          
+          let finalTeam: Team;
+
+          if (!originalTeam) {
+              // New team, just add it
+              finalTeam = updatedTeamFromUI;
+              return { ...curr, teams: [...curr.teams, finalTeam] };
+          } else {
+              // Existing team. We must merge projects because the UI might only have a partial list.
+              
+              // 1. Get IDs of projects currently visible in the UI (the ones being saved)
+              const visibleProjectIds = updatedTeamFromUI.projects.map(p => p.id);
+              
+              // 2. Find projects in the database that are NOT in the UI (hidden from this user)
+              // These must be preserved!
+              const hiddenProjects = originalTeam.projects.filter(p => !visibleProjectIds.includes(p.id));
+              
+              // 3. Merge: (UI Projects) + (Hidden Preserved Projects)
+              finalTeam = {
+                  ...updatedTeamFromUI,
+                  projects: [...updatedTeamFromUI.projects, ...hiddenProjects]
+              };
+
+              return {
+                  ...curr,
+                  teams: curr.teams.map(t => t.id === finalTeam.id ? finalTeam : t)
+              };
+          }
+      });
+      setAppState(newState);
+  };
+
   const handleAddTeam = createHandler((curr, t: Team) => ({...curr, teams: [...curr.teams, t]}));
   const handleDeleteTeam = createHandler((curr, id: string) => ({...curr, teams: curr.teams.filter(t => t.id !== id)}));
 
@@ -272,22 +390,15 @@ const AppContent: React.FC = () => {
       setAppState(newState);
   };
 
-  // Import State (Merge Logic could be placed here if needed)
   const handleImportState = (newState: AppState) => {
       setAppState(newState);
       saveState(newState);
       window.location.reload(); 
   }
 
-  // --- View Helper ---
-  const getVisibleTeams = () => {
-      if (!appState?.currentUser) return [];
-      if (appState.currentUser.role === UserRole.ADMIN) return appState.teams;
-      // Basic visibility logic: Manager sees own teams, Employees see teams they are in
-      return appState.teams; // Simplified for now to allow visibility
-  };
+  // --- RENDER ---
 
-  if (!appState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">Loading Smart System...</div>;
+  if (!appState || !viewState) return <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">Loading Smart System...</div>;
 
   if (!appState.currentUser) {
       return <Login users={appState.users} onLogin={handleLogin} />;
@@ -297,6 +408,7 @@ const AppContent: React.FC = () => {
       return activeTab.charAt(0).toUpperCase() + activeTab.slice(1).replace('-', ' ');
   }
 
+  // Use viewState for rendering to respect permissions
   return (
     <div className="flex bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-200">
       
@@ -362,15 +474,15 @@ const AppContent: React.FC = () => {
             </div>
         </header>
 
-        {/* Content */}
+        {/* Content - PASS VIEWSTATE (Filtered) to components */}
         <div className="p-8">
-            {activeTab === 'dashboard' && <KPIDashboard teams={getVisibleTeams()} />}
-            {activeTab === 'management' && <ManagementDashboard teams={appState.teams} users={appState.users} reports={appState.weeklyReports} llmConfig={appState.llmConfig} onUpdateReport={handleUpdateReport} onUpdateTeam={handleUpdateTeam} />}
-            {activeTab === 'projects' && <ProjectTracker teams={getVisibleTeams()} users={appState.users} currentUser={appState.currentUser} llmConfig={appState.llmConfig} prompts={appState.prompts} onUpdateTeam={handleUpdateTeam} />}
-            {activeTab === 'book-of-work' && <BookOfWork teams={getVisibleTeams()} users={appState.users} onUpdateTeam={handleUpdateTeam} />}
-            {activeTab === 'weekly-report' && <WeeklyReport reports={appState.weeklyReports} users={appState.users} teams={appState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onSaveReport={handleUpdateReport} />}
-            {activeTab === 'meetings' && <MeetingManager meetings={appState.meetings} teams={appState.teams} users={appState.users} llmConfig={appState.llmConfig} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} />}
-            {activeTab === 'notes' && <NotesManager notes={appState.notes} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />}
+            {activeTab === 'dashboard' && <KPIDashboard teams={viewState.teams} />}
+            {activeTab === 'management' && <ManagementDashboard teams={viewState.teams} users={viewState.users} reports={viewState.weeklyReports} llmConfig={appState.llmConfig} onUpdateReport={handleUpdateReport} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'projects' && <ProjectTracker teams={viewState.teams} users={viewState.users} currentUser={appState.currentUser} llmConfig={appState.llmConfig} prompts={appState.prompts} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'book-of-work' && <BookOfWork teams={viewState.teams} users={viewState.users} onUpdateTeam={handleUpdateTeam} />}
+            {activeTab === 'weekly-report' && <WeeklyReport reports={viewState.weeklyReports} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onSaveReport={handleUpdateReport} />}
+            {activeTab === 'meetings' && <MeetingManager meetings={viewState.meetings} teams={viewState.teams} users={viewState.users} llmConfig={appState.llmConfig} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} />}
+            {activeTab === 'notes' && <NotesManager notes={viewState.notes} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />}
             {activeTab === 'admin-users' && <AdminPanel users={appState.users} teams={appState.teams} onAddUser={handleAddUser} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onAddTeam={handleAddTeam} onUpdateTeam={handleUpdateTeam} onDeleteTeam={handleDeleteTeam} />}
             {activeTab === 'settings' && <SettingsPanel config={appState.llmConfig} appState={appState} onSave={handleUpdateLLMConfig} onImport={handleImportState} onUpdateUserPassword={handleUpdateUserPassword} />}
         </div>

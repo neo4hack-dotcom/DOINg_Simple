@@ -61,6 +61,19 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       setAiReport(null);
   }, [selectedTeamId]);
 
+  // Handle Escape Key to close modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            setEditingProject(null);
+            setEditingTask(null);
+            setShowRoadmapModal(false);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // --- Helper Functions ---
 
   const getStatusColor = (status: TaskStatus | ProjectStatus) => {
@@ -151,10 +164,19 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       setLoadingRoadmap(false);
   };
 
+  const cleanTextForClipboard = (text: string) => {
+      return text
+          .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+          .replace(/###\s?/g, '') // Remove headers
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links keeping text
+          .trim();
+  };
+
   const copyToClipboard = (text: string | null) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
-    alert("Copied to clipboard!");
+    const plainText = cleanTextForClipboard(text);
+    navigator.clipboard.writeText(plainText);
+    alert("Copied to clipboard (Plain Text)!");
   };
 
   const exportToDoc = (text: string | null, filename: string) => {

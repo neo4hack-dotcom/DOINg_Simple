@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Meeting, ActionItem, ActionItemStatus, Team, User, LLMConfig } from '../types';
 import { generateMeetingSummary } from '../services/llmService';
 import FormattedText from './FormattedText';
@@ -37,6 +38,17 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
 
   const [editMeeting, setEditMeeting] = useState<Meeting>(initialMeetingState);
 
+  // Handle Escape Key to close modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            setShowSummaryModal(false);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleSelectMeeting = (id: string) => {
     if (id === 'new') {
         setSelectedMeetingId('new');
@@ -72,9 +84,18 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
       setIsGenerating(false);
   };
 
+  const cleanTextForClipboard = (text: string) => {
+      return text
+          .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+          .replace(/###\s?/g, '') // Remove headers
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links keeping text
+          .trim();
+  };
+
   const copyToClipboard = () => {
-      navigator.clipboard.writeText(generatedSummary);
-      alert("Copied to clipboard!");
+      const plainText = cleanTextForClipboard(generatedSummary);
+      navigator.clipboard.writeText(plainText);
+      alert("Copied to clipboard (Plain Text)!");
   };
 
   const exportToDoc = () => {

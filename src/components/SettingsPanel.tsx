@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppState, LLMConfig, LLMProvider, User, UserRole } from '../types';
 import { fetchOllamaModels, DEFAULT_PROMPTS, testConnection } from '../services/llmService';
 import { clearState } from '../services/storage';
-import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle, Merge, HardDrive, WifiOff } from 'lucide-react';
+import { Save, RefreshCw, Cpu, Server, Key, Link, Download, Upload, Database, Settings, Lock, Trash2, AlertOctagon, MessageSquare, RotateCcw, FileJson, Workflow, CheckCircle2, XCircle, Merge, HardDrive, WifiOff, Search } from 'lucide-react';
 
 interface SettingsPanelProps {
   config: LLMConfig;
@@ -21,6 +21,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [activeTab, setActiveTab] = useState<'general' | 'prompts'>('general');
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  
+  // Prompt Filtering
+  const [promptSearch, setPromptSearch] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importMode, setImportMode] = useState<'overwrite' | 'merge'>('overwrite');
@@ -283,6 +286,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
       }
   }
 
+  const formatPromptKey = (key: string) => {
+      return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       
@@ -323,34 +330,54 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ config, appState, onSave,
                         System Prompts Editor
                     </h3>
                     <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                        Customize how the AI generates content. Use placeholders like <code>{'{{DATA}}'}</code> to inject context.
+                        Customize how the AI generates content. Use placeholders like <code>{'{{DATA}}'}</code>, <code>{'{{DATE}}'}</code> or <code>{'{{TITLE}}'}</code> to inject context.
                     </p>
                 </div>
 
-                {Object.entries(DEFAULT_PROMPTS).map(([key, defaultPrompt]) => (
-                    <div key={key} className="space-y-2">
-                        <div className="flex justify-between items-center">
-                            <label className="text-sm font-bold text-slate-700 dark:text-slate-300 capitalize">
-                                {key.replace('_', ' ')}
-                            </label>
-                            {localPrompts[key] && localPrompts[key] !== defaultPrompt && (
-                                <button 
-                                    onClick={() => handleResetPrompt(key)}
-                                    className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"
-                                >
-                                    <RotateCcw className="w-3 h-3" /> Reset to Default
-                                </button>
-                            )}
+                {/* Filter Bar */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                    <input 
+                        type="text" 
+                        placeholder="Filter prompts (e.g. working group, meeting)..."
+                        value={promptSearch}
+                        onChange={e => setPromptSearch(e.target.value)}
+                        className="w-full pl-9 p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white"
+                    />
+                </div>
+
+                <div className="space-y-8">
+                    {Object.entries(DEFAULT_PROMPTS)
+                        .filter(([key]) => key.toLowerCase().includes(promptSearch.toLowerCase()))
+                        .map(([key, defaultPrompt]) => (
+                        <div key={key} className="space-y-2 pb-6 border-b border-slate-100 dark:border-slate-800 last:border-0 last:pb-0">
+                            <div className="flex justify-between items-center">
+                                <label className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                                    {formatPromptKey(key)}
+                                    <span className="ml-2 text-xs font-normal text-slate-400 font-mono">({key})</span>
+                                </label>
+                                {localPrompts[key] && localPrompts[key] !== defaultPrompt && (
+                                    <button 
+                                        onClick={() => handleResetPrompt(key)}
+                                        className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors"
+                                    >
+                                        <RotateCcw className="w-3 h-3" /> Reset to Default
+                                    </button>
+                                )}
+                            </div>
+                            <textarea 
+                                value={localPrompts[key] || defaultPrompt}
+                                onChange={(e) => setLocalPrompts({ ...localPrompts, [key]: e.target.value })}
+                                className="w-full h-48 p-4 text-xs font-mono bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y leading-relaxed"
+                            />
                         </div>
-                        <textarea 
-                            value={localPrompts[key] || defaultPrompt}
-                            onChange={(e) => setLocalPrompts({ ...localPrompts, [key]: e.target.value })}
-                            className="w-full h-48 p-4 text-sm font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
-                        />
-                    </div>
-                ))}
+                    ))}
+                    {Object.entries(DEFAULT_PROMPTS).filter(([key]) => key.toLowerCase().includes(promptSearch.toLowerCase())).length === 0 && (
+                        <p className="text-center text-slate-400 italic text-sm">No prompts found matching filter.</p>
+                    )}
+                </div>
                 
-                <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700">
+                <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-700 sticky bottom-0 bg-white dark:bg-slate-800 pb-2">
                     <button 
                         onClick={handleSave}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition-all"

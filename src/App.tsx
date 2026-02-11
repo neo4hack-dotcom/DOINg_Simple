@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, ErrorInfo, ReactNode, Component } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
 import ProjectTracker from './components/ProjectTracker';
@@ -478,7 +478,7 @@ const AppContent: React.FC = () => {
             {activeTab === 'management' && <ManagementDashboard teams={viewState.teams} users={viewState.users} reports={viewState.weeklyReports} llmConfig={appState.llmConfig} onUpdateReport={handleUpdateReport} onUpdateTeam={handleUpdateTeam} />}
             {activeTab === 'projects' && <ProjectTracker teams={viewState.teams} users={viewState.users} currentUser={appState.currentUser} llmConfig={appState.llmConfig} prompts={appState.prompts} onUpdateTeam={handleUpdateTeam} />}
             {activeTab === 'book-of-work' && <BookOfWork teams={viewState.teams} users={viewState.users} onUpdateTeam={handleUpdateTeam} />}
-            {activeTab === 'working-groups' && <WorkingGroupModule groups={viewState.workingGroups || []} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup} />}
+            {activeTab === 'working-groups' && <WorkingGroupModule groups={viewState.workingGroups || []} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateGroup={handleUpdateGroup} onDeleteGroup={handleDeleteGroup} />}
             {activeTab === 'weekly-report' && <WeeklyReport reports={viewState.weeklyReports} users={viewState.users} teams={viewState.teams} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onSaveReport={handleUpdateReport} />}
             {activeTab === 'meetings' && <MeetingManager meetings={viewState.meetings} teams={viewState.teams} users={viewState.users} llmConfig={appState.llmConfig} onUpdateMeeting={handleUpdateMeeting} onDeleteMeeting={handleDeleteMeeting} />}
             {activeTab === 'notes' && <NotesManager notes={viewState.notes} currentUser={appState.currentUser} llmConfig={appState.llmConfig} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />}

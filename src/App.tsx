@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ErrorInfo, ReactNode } from 'react';
+import React, { Component, useState, useEffect, ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminPanel from './components/AdminPanel';
 import ProjectTracker from './components/ProjectTracker';
@@ -27,10 +27,13 @@ interface ErrorBoundaryState {
 
 // --- Error Boundary ---
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
-    hasError: false,
-    error: null
-  };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -56,6 +59,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
             <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">App Error</h1>
             <p className="text-sm text-gray-500 mb-4">{this.state.error?.toString()}</p>
             <button onClick={this.handleReload} className="bg-indigo-600 text-white px-4 py-2 rounded">Reload</button>
+            <button onClick={this.handleReset} className="ml-2 text-red-600 hover:underline text-sm font-medium">Reset Data</button>
           </div>
         </div>
       );
@@ -88,12 +92,16 @@ const AppContent: React.FC = () => {
     const initServerSync = async () => {
         const serverData = await fetchFromServer();
         if (serverData) {
-            // If server is newer than local, use server
+            // Merge logic: Take server data but keep local session (User & Theme)
             if ((serverData.lastUpdated || 0) > (localData.lastUpdated || 0)) {
-                console.log("📥 Initial Load: Server data is newer. Updating.");
-                setAppState(serverData);
-                // Update local storage to match server without triggering save loop
-                localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
+                console.log("📥 Initial Load: Server data is newer. Updating content.");
+                const mergedState = {
+                    ...serverData,
+                    currentUser: localData.currentUser, // KEEP LOCAL SESSION
+                    theme: localData.theme // KEEP LOCAL THEME
+                };
+                setAppState(mergedState);
+                localStorage.setItem('teamsync_data_v15', JSON.stringify(mergedState));
             }
             setIsOnline(true);
         } else {
@@ -111,14 +119,24 @@ const AppContent: React.FC = () => {
             
             setAppState(currentState => {
                 if (!currentState) return serverData;
+                
                 // Only update if server is strictly newer than what we have in memory
                 if ((serverData.lastUpdated || 0) > (currentState.lastUpdated || 0)) {
                     console.log("🔄 Auto-Sync: New data received from server.");
                     setShowSyncToast(true);
                     setTimeout(() => setShowSyncToast(false), 4000);
+                    
+                    // CRITICAL FIX: Merge server data but PRESERVE local session state
+                    const mergedState = {
+                        ...serverData,
+                        currentUser: currentState.currentUser, // Keep my login
+                        theme: currentState.theme, // Keep my theme preference
+                        llmConfig: currentState.llmConfig // Keep local LLM config if wanted, or sync it. Usually config is shared but keys might be local. Let's assume shared config for now but protected user.
+                    };
+
                     // Persist to local for offline backup
-                    localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
-                    return serverData;
+                    localStorage.setItem('teamsync_data_v15', JSON.stringify(mergedState));
+                    return mergedState;
                 }
                 return currentState;
             });
@@ -168,16 +186,25 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogin = (user: User) => {
-      // Sync latest before login
+      // Fetch latest data first to ensure we have latest DB state before logging in locally
       fetchFromServer().then(serverData => {
-          if (serverData) {
-              localStorage.setItem('teamsync_data_v15', JSON.stringify(serverData));
-              setAppState(curr => ({...serverData, currentUser: user})); // Optimistic update
-          }
+          setAppState(currentState => {
+              // Base data source: Server if available, else current Local
+              const baseData = serverData || currentState;
+              if (!baseData) return null;
+
+              const newState = {
+                  ...baseData,
+                  currentUser: user, // Set the new user locally
+                  lastUpdated: Date.now()
+              };
+              
+              // Save to localStorage immediately so F5 works
+              localStorage.setItem('teamsync_data_v15', JSON.stringify(newState));
+              return newState;
+          });
       });
       
-      const newState = updateAppState(current => ({ ...current, currentUser: user }));
-      setAppState(newState);
       setActiveTab('dashboard');
   }
 

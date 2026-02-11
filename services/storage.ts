@@ -94,14 +94,18 @@ export const saveState = (state: AppState) => {
     const timestamp = Date.now();
     const stateWithTimestamp = { ...state, lastUpdated: timestamp };
     
-    // 1. Sauvegarde Locale (Instantané)
+    // 1. Sauvegarde Locale (Instantané) - Inclut currentUser pour F5
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stateWithTimestamp));
     
     // 2. Sauvegarde Serveur (Asynchrone / Fichier Central)
+    // IMPORTANT: On retire currentUser et theme avant d'envoyer au serveur
+    // pour ne pas écraser la session des autres utilisateurs.
+    const { currentUser, theme, ...serverPayload } = stateWithTimestamp;
+
     fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stateWithTimestamp)
+        body: JSON.stringify(serverPayload)
     }).catch(err => console.error("Échec sauvegarde serveur:", err));
 
     // 3. Notification inter-onglets

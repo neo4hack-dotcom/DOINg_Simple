@@ -1,8 +1,7 @@
 
-
 import React, { useState } from 'react';
 import { User } from '../types';
-import { Lock, User as UserIcon, ArrowRight } from 'lucide-react';
+import { Lock, User as UserIcon, ArrowRight, AlertTriangle } from 'lucide-react';
 
 interface LoginProps {
   users: User[];
@@ -33,13 +32,15 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
       <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 p-10 fallback-card relative overflow-hidden">
         
         {/* Header */}
-        <div className="flex flex-col items-center mb-10">
+        <div className="flex flex-col items-center mb-8">
           <div className="w-14 h-14 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 shadow-indigo-200 dark:shadow-none shadow-lg">
               <span className="text-white font-bold text-3xl tracking-tighter">D</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">DOINg</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">Reporting Management System</p>
-          <p className="text-xs text-indigo-500 mt-2 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">Local Mode</p>
+          <div className="flex gap-2 mt-2">
+             <p className="text-xs text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800">Local Mode</p>
+          </div>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6">
@@ -101,6 +102,18 @@ const Login: React.FC<LoginProps> = ({ users, onLogin }) => {
             <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
+
+        {/* Disclaimer Section */}
+        <div className="mt-8 pt-4 border-t border-gray-100 dark:border-gray-800 text-center">
+            <div className="flex items-center justify-center gap-2 text-amber-600 dark:text-amber-500 mb-1">
+                <AlertTriangle className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-wide">Disclaimer</span>
+            </div>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+                No secret or confidential data allowed in this App.
+            </p>
+        </div>
+
       </div>
     </div>
   );

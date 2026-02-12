@@ -125,6 +125,7 @@ export interface Project {
   members: ProjectMember[];
   tasks: Task[];
   isImportant: boolean; 
+  isArchived?: boolean; // New: Flag for archived projects (excluded from KPIs)
   docUrls?: string[]; 
   dependencies?: string[]; // Internal Project IDs
   externalDependencies?: ExternalDependency[]; // New: External systems/people

@@ -6,7 +6,7 @@ import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit, Archive, RotateCcw
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -26,6 +26,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   
   // Selection State for AI Report
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
+  // View Mode: Live vs Archived
+  const [showArchived, setShowArchived] = useState(false);
 
   // Modals state
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -126,10 +129,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   const toggleSelectAll = () => {
       if (!currentTeam) return;
-      if (selectedProjectIds.length === currentTeam.projects.length) {
+      const visibleProjects = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
+      
+      if (selectedProjectIds.length === visibleProjects.length) {
           setSelectedProjectIds([]);
       } else {
-          setSelectedProjectIds(currentTeam.projects.map(p => p.id));
+          setSelectedProjectIds(visibleProjects.map(p => p.id));
       }
   };
 
@@ -138,10 +143,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
     setLoadingAi(true);
     setAiReport(null);
     
-    // Filter projects if specific ones are selected, otherwise use all
+    // Filter projects if specific ones are selected, otherwise use all visible
+    const visibleProjects = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
     const projectsToAnalyze = selectedProjectIds.length > 0 
-        ? currentTeam.projects.filter(p => selectedProjectIds.includes(p.id)) 
-        : currentTeam.projects;
+        ? visibleProjects.filter(p => selectedProjectIds.includes(p.id)) 
+        : visibleProjects;
 
     // Create a temporary team object with only the relevant projects for the AI
     const scopedTeam = {
@@ -210,6 +216,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           members: [],
           tasks: [],
           isImportant: false,
+          isArchived: false,
           docUrls: [],
           dependencies: [],
           externalDependencies: [],
@@ -217,6 +224,36 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       };
       setEditingProject(newProject);
   };
+
+  // --- Archive & Restore Logic ---
+  const handleArchiveProject = (projectId: string) => {
+      if(window.confirm("Are you sure you want to mark this project as COMPLETED and ARCHIVE it?")) {
+          if(window.confirm("Double confirmation: This project will be hidden from Dashboard KPIs and Management Reports. Continue?")) {
+              updateTeamData(team => {
+                  const project = team.projects.find(p => p.id === projectId);
+                  if (project) {
+                      project.isArchived = true;
+                      project.status = ProjectStatus.DONE; // Auto-set status to Done
+                  }
+              });
+              if(expandedProjectId === projectId) setExpandedProjectId(null);
+              setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
+          }
+      }
+  };
+
+  const handleRestoreProject = (projectId: string) => {
+      if(window.confirm("Restore this project to LIVE view? It will affect KPIs again.")) {
+          updateTeamData(team => {
+              const project = team.projects.find(p => p.id === projectId);
+              if (project) {
+                  project.isArchived = false;
+                  // Keep status as DONE or switch to ACTIVE? Let's keep DONE but user can change it.
+              }
+          });
+          setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
+      }
+  }
 
   const handleDeleteProject = (projectId: string) => {
       if(!window.confirm("Are you sure you want to delete this project? This action cannot be undone.")) return;
@@ -457,6 +494,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const isKnownUser = (id?: string) => users.some(u => u.id === id);
   const isCustomAssignee = editingTask?.task.assigneeId && !isKnownUser(editingTask.task.assigneeId);
 
+  // --- FILTERING FOR VIEW ---
+  const displayedProjects = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
@@ -525,7 +565,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* ... (Project Edit Modal) ... */}
+      {/* ... (Project Edit Modal - Same as before) ... */}
       {editingProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col max-h-[90vh]">
@@ -679,6 +719,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       {/* Task Edit Modal */}
       {editingTask && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+              {/* ... (Task Modal Content remains unchanged) ... */}
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-4">
                       <h3 className="text-lg font-bold dark:text-white">Edit Task</h3>
@@ -927,8 +968,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* ... (Team Header, AI Report, Bulk Selection components remain same) ... */}
-      
       {/* Team Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -958,13 +997,32 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
            </div>
         </div>
 
-        <div className="flex gap-2">
+        {/* View Toggle (Live vs Archive) */}
+        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
             <button 
-                onClick={handleCreateProject}
-                className="flex items-center px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm transition-all font-medium text-sm"
+                onClick={() => setShowArchived(false)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!showArchived ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500 hover:text-slate-700'}`}
             >
-                <Briefcase className="w-4 h-4 mr-2" /> New Project
+                Live Projects
             </button>
+            <button 
+                onClick={() => setShowArchived(true)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${showArchived ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+                <Archive className="w-3 h-3" />
+                Archive
+            </button>
+        </div>
+
+        <div className="flex gap-2">
+            {!showArchived && (
+                <button 
+                    onClick={handleCreateProject}
+                    className="flex items-center px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm transition-all font-medium text-sm"
+                >
+                    <Briefcase className="w-4 h-4 mr-2" /> New Project
+                </button>
+            )}
 
             <button 
                 onClick={handleGenerateReport}
@@ -1021,12 +1079,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                 onClick={toggleSelectAll}
                 className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-2"
               >
-                  {selectedProjectIds.length > 0 && selectedProjectIds.length === currentTeam.projects.length ? (
+                  {selectedProjectIds.length > 0 && selectedProjectIds.length === displayedProjects.length ? (
                       <CheckSquare className="w-4 h-4" />
                   ) : (
                       <Square className="w-4 h-4" />
                   )}
-                  {selectedProjectIds.length > 0 ? 'Deselect All' : 'Select All Projects'}
+                  {selectedProjectIds.length > 0 ? 'Deselect All' : `Select All ${showArchived ? 'Archived' : 'Live'} Projects`}
               </button>
               {selectedProjectIds.length > 0 && (
                   <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">
@@ -1039,7 +1097,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
       {/* Projects Grid */}
       <div className="space-y-6">
-        {currentTeam.projects.map(project => {
+        {displayedProjects.map(project => {
             const health = getProjectHealth(project);
             const isExpanded = expandedProjectId === project.id;
             const progress = calculateWeightedProgress(project.tasks);
@@ -1075,12 +1133,13 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                 )}
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{project.name}</h3>
                                 
-                                {/* Quick Status Change Project */}
+                                {/* Quick Status Change Project (Disabled if Archived) */}
                                 <div onClick={(e) => e.stopPropagation()}>
                                     <select 
                                         value={project.status}
                                         onChange={(e) => handleProjectUpdate(project.id, 'status', e.target.value)}
-                                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 cursor-pointer appearance-none ${getStatusColor(project.status)}`}
+                                        disabled={project.isArchived}
+                                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 cursor-pointer appearance-none ${getStatusColor(project.status)} disabled:opacity-70 disabled:cursor-not-allowed`}
                                     >
                                         {Object.values(ProjectStatus).map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
@@ -1119,7 +1178,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             </div>
                         </div>
 
-                        {/* Meta Stats */}
+                        {/* Meta Stats & Actions */}
                         <div className="flex items-center gap-6 text-sm text-slate-500 dark:text-slate-400">
                              <div className="flex flex-col items-end min-w-[100px]">
                                 <span className="text-xs uppercase font-semibold text-slate-400 mb-1">Timeline</span>
@@ -1155,6 +1214,27 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                 >
                                     <Trash2 className="w-4 h-4" />
                                 </button>
+                             )}
+
+                             {/* Archive / Restore Button */}
+                             {isExpanded && (
+                                 <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (project.isArchived) {
+                                            handleRestoreProject(project.id);
+                                        } else {
+                                            handleArchiveProject(project.id);
+                                        }
+                                    }}
+                                    className={`p-2 rounded-lg transition-colors ${project.isArchived 
+                                        ? 'text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30' 
+                                        : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    }`}
+                                    title={project.isArchived ? "Restore to Live" : "Archive (Complete)"}
+                                 >
+                                     {project.isArchived ? <RotateCcw className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                                 </button>
                              )}
 
                              <div 
@@ -1213,12 +1293,15 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                 >
                                     <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate Booklet
                                 </button>
-                                <button 
-                                    onClick={() => handleAddTask(project.id)}
-                                    className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md transition-colors"
-                                >
-                                    <Plus className="w-4 h-4 mr-1" /> Add Task
-                                </button>
+                                
+                                {!project.isArchived && (
+                                    <button 
+                                        onClick={() => handleAddTask(project.id)}
+                                        className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md transition-colors"
+                                    >
+                                        <Plus className="w-4 h-4 mr-1" /> Add Task
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -1391,16 +1474,20 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
             );
         })}
 
-        {currentTeam.projects.length === 0 && (
+        {displayedProjects.length === 0 && (
              <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400">
-                 <p className="text-lg font-medium">No active projects</p>
-                 <p className="text-sm">Get started by creating a new project for this team.</p>
-                 <button 
-                    onClick={handleCreateProject}
-                    className="mt-4 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
-                 >
-                     Create Project
-                 </button>
+                 <p className="text-lg font-medium">{showArchived ? "No archived projects" : "No active projects"}</p>
+                 <p className="text-sm">
+                     {showArchived ? "Archived projects will appear here." : "Get started by creating a new project for this team."}
+                 </p>
+                 {!showArchived && (
+                     <button 
+                        onClick={handleCreateProject}
+                        className="mt-4 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                     >
+                         Create Project
+                     </button>
+                 )}
              </div>
         )}
       </div>

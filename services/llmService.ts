@@ -207,34 +207,37 @@ MANDATORY STRUCTURE:
 Tone: Action-oriented.
 `,
     what_to_do: `
-You are a highly efficient Productivity Coach and Project Manager.
-Analyze the provided workload data for the user.
+You are an elite Productivity Coach and Strategic Project Manager.
+Analyze the user's total workload (Tasks, Projects, Meetings, Working Groups) to create a high-impact daily plan.
 
 DATA:
 {{DATA}}
 
-TASK:
-Suggest a "Game Plan" for today to maximize impact.
-1. Identify immediate urgencies (Due today/overdue).
-2. Identify blockers to resolve (tasks blocked).
-3. Suggest a logical sequence of work (e.g., "Start with X to unblock team, then focus on Y").
-4. If data is missing (e.g. empty descriptions), suggest filling it.
+OBJECTIVE:
+Create a plan that balances urgent fire-fighting with strategic progress on upcoming deadlines.
+Don't just look at what is due today; look ahead to ensure the user is not overwhelmed next week.
 
-MANDATORY STRUCTURE:
+ANALYSIS GUIDELINES:
+1. **The Big Picture**: Identify upcoming deadlines (next 7-14 days). Suggest starting them now if they are complex.
+2. **Deep Work**: Identify 1-2 complex, high-value tasks that require focused time today to avoid last-minute stress later.
+3. **Batching**: Group similar small tasks (e.g., "Email follow-ups", "Admin", "Validation") to be done together for efficiency.
+4. **Unblocking**: Highlight tasks where the user is blocking others (Blocked status) or needs to unblock themselves.
 
-### 🚨 Immediate Priorities (Must Do)
-(Bullet points of overdue/today items. Use **Bold** for dates).
+MANDATORY OUTPUT STRUCTURE:
 
-### 🔓 Unblocking the Flow
-(Items marked as BLOCKED or dependencies).
+### 🎯 The "One Big Thing" (Strategic Focus)
+(Select the single most impactful task/project to advance today. Explain why it matters for future success).
 
-### 💡 Strategic Focus
-(Suggestion on which project/topic to advance today based on importance).
+### 🚨 Urgent & Overdue (Fire-fighting)
+(List items overdue or due within 24h. If empty, write "No immediate fires to put out!").
 
-### 🎲 Quick Wins
-(Small tasks to clear the backlog).
+### 🔭 Proactive Advances (Upcoming)
+(List tasks due in the next 1-2 weeks that should be started *today* to stay ahead of the curve).
 
-Constraint: Be precise, concise, and do NOT invent tasks. Use only provided data.
+### ⚡ Quick Wins & Batching
+(List small tasks/actions to knock out quickly in one go to clear mental clutter).
+
+Constraint: Be specific. Use the provided task titles, project names, and dates. Do not invent generic advice.
 `,
     checklist_extraction: `
 You are an expert project manager.
@@ -272,7 +275,18 @@ const appendLanguage = (prompt: string, lang: 'en' | 'fr' = 'en') => {
 // --- Utility Functions for Data Preparation ---
 
 const prepareDailyContext = (teams: Team[], workingGroups: WorkingGroup[], user: User): string => {
-    let context = `USER: ${user.firstName} ${user.lastName}\nDATE: ${new Date().toISOString().split('T')[0]}\n\n`;
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    let context = `USER: ${user.firstName} ${user.lastName}\nCURRENT DATE: ${todayStr}\n\n`;
+
+    const getDaysRemaining = (dateStr: string) => {
+        if (!dateStr) return "No Due Date";
+        const diffTime = new Date(dateStr).getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) return `OVERDUE by ${Math.abs(diffDays)} days`;
+        if (diffDays === 0) return "DUE TODAY";
+        return `${diffDays} days remaining`;
+    };
 
     // 1. Projects & Tasks
     context += "--- PROJECT TASKS ---\n";
@@ -287,7 +301,8 @@ const prepareDailyContext = (teams: Team[], workingGroups: WorkingGroup[], user:
             if (relevantTasks.length > 0) {
                 context += `Project: ${p.name} (Team: ${t.name})\n`;
                 relevantTasks.forEach(task => {
-                    context += `- [${task.status}] ${task.title} (Due: ${task.eta || 'None'}, Priority: ${task.priority || 'Medium'}). ${task.isImportant ? 'IMPORTANT.' : ''}\n`;
+                    const timeline = getDaysRemaining(task.eta);
+                    context += `- [${task.status}] ${task.title} (Timeline: ${timeline}, Priority: ${task.priority || 'Medium'}). ${task.isImportant ? 'IMPORTANT.' : ''}\n`;
                 });
             }
         });
@@ -302,7 +317,8 @@ const prepareDailyContext = (teams: Team[], workingGroups: WorkingGroup[], user:
             if(myActions.length > 0) {
                 context += `Group: ${g.title}\n`;
                 myActions.forEach(a => {
-                    context += `- [${a.status}] ${a.description} (Due: ${a.dueDate || 'None'})\n`;
+                    const timeline = getDaysRemaining(a.dueDate);
+                    context += `- [${a.status}] ${a.description} (Timeline: ${timeline})\n`;
                 });
             }
         });
@@ -890,17 +906,19 @@ export const sendChatMessage = async (history: ChatMessage[], newPrompt: string,
     const fullPrompt = `
     You are DOINg Assistant, an AI integrated into a project management tool.
     
+    CRITICAL: You MUST answer strictly in ENGLISH.
+    
     Here is the recent conversation history:
     ${context}
     
     New User Request:
     ${newPrompt}
     
-    Answer in a helpful, professional, and concise manner.
+    Answer in a helpful, professional, and concise manner in ENGLISH.
     Use **Bold** for emphasis. If mentioning risks, use words like "Warning" or "Alert" inside bold tags.
     `;
     
-    return runPrompt(appendLanguage(fullPrompt, language), config, images);
+    return runPrompt(fullPrompt, config, images);
 };
 
 export const generateDocumentSynthesis = async (contentOrDescription: string, config: LLMConfig, language: 'en' | 'fr' = 'en'): Promise<string> => {

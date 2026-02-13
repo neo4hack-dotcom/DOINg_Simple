@@ -1,21 +1,25 @@
 
-import React, { useState, useEffect } from 'react';
-import { Team, User, WeeklyReport, Task, TaskStatus, ProjectStatus, LLMConfig, Project, TaskPriority, HealthStatus } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Team, User, WeeklyReport, Task, TaskStatus, ProjectStatus, LLMConfig, Project, TaskPriority, HealthStatus, Meeting, WorkingGroup, ActionItemStatus, AppNotification, UserRole } from '../types';
 import { generateManagementInsight, generateRiskAssessment } from '../services/llmService';
 import FormattedText from './FormattedText';
-import { AlertTriangle, Clock, CheckCircle2, FileText, ChevronDown, ChevronRight, MessageSquare, Check, X, Bot, Loader2, Plus, Zap, Briefcase, Download, Copy, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Clock, CheckCircle2, FileText, ChevronDown, ChevronRight, MessageSquare, Check, X, Bot, Loader2, Plus, Zap, Briefcase, Download, Copy, ShieldAlert, Activity, LayoutList, Target, Layers, Bell, BarChart3 } from 'lucide-react';
 
 interface ManagementDashboardProps {
   teams: Team[];
   users: User[];
   reports: WeeklyReport[];
+  meetings: Meeting[];
+  workingGroups: WorkingGroup[];
   llmConfig?: LLMConfig;
+  notifications: AppNotification[]; 
+  currentUser: User | null; 
   onUpdateReport: (report: WeeklyReport) => void;
-  onUpdateTeam?: (team: Team) => void; // Added to support task creation
+  onUpdateTeam?: (team: Team) => void; 
+  onMarkNotificationRead: (id: string) => void; 
 }
 
-const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users, reports, llmConfig, onUpdateReport, onUpdateTeam }) => {
-  const [expandedTeam, setExpandedTeam] = useState<string | null>(teams[0]?.id || null);
+const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users, reports, meetings, workingGroups, llmConfig, notifications, currentUser, onUpdateReport, onUpdateTeam, onMarkNotificationRead }) => {
   const [selectedReport, setSelectedReport] = useState<WeeklyReport | null>(null);
   const [annotation, setAnnotation] = useState('');
 
@@ -24,11 +28,12 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
   const [aiInsight, setAiInsight] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [insightType, setInsightType] = useState<'synthesis' | 'risk'>('synthesis');
+  const [aiLang, setAiLang] = useState<'en'|'fr'>('en');
 
   // Quick Create State
   const [showQuickCreate, setShowQuickCreate] = useState<'none' | 'project' | 'task'>('none');
   const [quickTeamId, setQuickTeamId] = useState(teams[0]?.id || '');
-  const [quickProjectId, setQuickProjectId] = useState(''); // Only for task
+  const [quickProjectId, setQuickProjectId] = useState(''); 
   
   // Quick Project Form
   const [newProjectName, setNewProjectName] = useState('');
@@ -37,6 +42,60 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState('');
   const [newTaskOrder, setNewTaskOrder] = useState(1);
+
+  const isAdmin = currentUser?.role === UserRole.ADMIN;
+  const adminNotifications = notifications;
+
+  // ... (KPI Aggregation code remains same) ...
+  const kpis = useMemo(() => {
+      // 1. Projects & Tasks
+      const allTasks = teams.flatMap(t => t.projects.filter(p => !p.isArchived).flatMap(p => p.tasks));
+      const totalTasks = allTasks.length;
+      const blockedTasks = allTasks.filter(t => t.status === TaskStatus.BLOCKED).length;
+      const openTasks = allTasks.filter(t => t.status !== TaskStatus.DONE).length;
+      const overdueProjects = teams.flatMap(t => t.projects.filter(p => !p.isArchived)).filter(p => p.status !== ProjectStatus.DONE && new Date(p.deadline) < new Date()).length;
+
+      // 2. Meetings
+      const allMeetingActions = meetings.flatMap(m => m.actionItems);
+      const openMeetingActions = allMeetingActions.filter(a => a.status !== ActionItemStatus.DONE).length;
+      const blockedMeetingActions = allMeetingActions.filter(a => a.status === ActionItemStatus.BLOCKED).length;
+      
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      const meetingsThisWeek = meetings.filter(m => new Date(m.date) >= oneWeekAgo).length;
+
+      // 3. Working Groups
+      const activeGroups = workingGroups.filter(g => !g.archived);
+      const allWGSessions = activeGroups.flatMap(g => g.sessions);
+      const allWGActions = allWGSessions.flatMap(s => s.actionItems);
+      const openWGActions = allWGActions.filter(a => a.status !== ActionItemStatus.DONE).length;
+      const blockedWGActions = allWGActions.filter(a => a.status === ActionItemStatus.BLOCKED).length;
+      const sessionsThisWeek = allWGSessions.filter(s => new Date(s.date) >= oneWeekAgo).length;
+
+      // 4. Reports
+      const pendingReports = reports.filter(r => !r.managerCheck).length;
+
+      // Total Calculations
+      const totalOpenActions = openTasks + openMeetingActions + openWGActions;
+      const totalBlocked = blockedTasks + blockedMeetingActions + blockedWGActions;
+      const totalActivity = meetingsThisWeek + sessionsThisWeek;
+
+      return {
+          totalOpenActions,
+          totalBlocked,
+          totalActivity,
+          pendingReports,
+          breakdown: {
+              tasks: openTasks,
+              meetingActions: openMeetingActions,
+              wgActions: openWGActions
+          },
+          alerts: {
+              overdueProjects,
+              blockedTasks
+          }
+      };
+  }, [teams, meetings, workingGroups, reports]);
 
   // Handle Escape Key to close modals
   useEffect(() => {
@@ -50,33 +109,6 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // --- Helpers for Alerts ---
-  const getAlerts = () => {
-    let blockedTasks = 0;
-    let overdueProjects = 0;
-    let pendingReports = 0;
-
-    const today = new Date();
-    
-    // Check Tasks & Projects
-    teams.forEach(t => {
-        t.projects.forEach(p => {
-            if (p.status !== ProjectStatus.DONE && new Date(p.deadline) < today) overdueProjects++;
-            p.tasks.forEach(task => {
-                if (task.status === TaskStatus.BLOCKED) blockedTasks++;
-            });
-        });
-    });
-
-    // Check Reports (Current Week)
-    // Simplified: Pending if not checked by manager
-    pendingReports = reports.filter(r => !r.managerCheck).length;
-
-    return { blockedTasks, overdueProjects, pendingReports };
-  };
-
-  const alerts = getAlerts();
 
   const handleOpenReport = (report: WeeklyReport) => {
       setSelectedReport(report);
@@ -99,7 +131,13 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
       setShowAiModal(true);
       setInsightType('synthesis');
       setAiInsight('');
-      const insight = await generateManagementInsight(teams, reports, users, llmConfig);
+      
+      const activeTeams = teams.map(t => ({
+          ...t,
+          projects: t.projects.filter(p => !p.isArchived)
+      }));
+
+      const insight = await generateManagementInsight(activeTeams, reports, users, llmConfig, undefined, aiLang);
       setAiInsight(insight);
       setIsAiLoading(false);
   };
@@ -110,17 +148,20 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
       setShowAiModal(true);
       setInsightType('risk');
       setAiInsight('');
-      const insight = await generateRiskAssessment(teams, reports, users, llmConfig);
+
+      const activeTeams = teams.map(t => ({
+          ...t,
+          projects: t.projects.filter(p => !p.isArchived)
+      }));
+
+      const insight = await generateRiskAssessment(activeTeams, reports, users, llmConfig, aiLang);
       setAiInsight(insight);
       setIsAiLoading(false);
   }
 
+  // ... (Clipboard & Quick Create functions remain same) ...
   const cleanTextForClipboard = (text: string) => {
-      return text
-          .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
-          .replace(/###\s?/g, '') // Remove headers
-          .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links keeping text
-          .trim();
+      return text.trim();
   };
 
   const copyToClipboard = () => {
@@ -150,11 +191,15 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
           status: ProjectStatus.PLANNING,
           managerId: team.managerId,
           deadline: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(), 
           members: [],
           tasks: [],
           isImportant: false,
+          isArchived: false,
           docUrls: [],
-          dependencies: []
+          dependencies: [],
+          externalDependencies: [],
+          additionalDescriptions: []
       };
 
       onUpdateTeam({ ...team, projects: [...team.projects, newProject] });
@@ -181,6 +226,9 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
           weight: 1,
           isImportant: false,
           checklist: [],
+          actions: [],
+          externalDependencies: [],
+          docUrls: [],
           order: newTaskOrder || project.tasks.length + 1
       };
 
@@ -208,8 +256,268 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
       }
   };
 
+  // ... (Chart Component) ...
+  const ActionDistribution = () => {
+      const total = kpis.totalOpenActions || 1; 
+      const pTasks = (kpis.breakdown.tasks / total) * 100;
+      const pMeet = (kpis.breakdown.meetingActions / total) * 100;
+      const pWG = (kpis.breakdown.wgActions / total) * 100;
+
+      return (
+          <div className="mt-2 w-full h-3 bg-slate-100 dark:bg-slate-700 rounded-full flex overflow-hidden">
+              <div style={{ width: `${pTasks}%` }} className="bg-blue-500" title={`Project Tasks: ${kpis.breakdown.tasks}`} />
+              <div style={{ width: `${pMeet}%` }} className="bg-purple-500" title={`Meeting Actions: ${kpis.breakdown.meetingActions}`} />
+              <div style={{ width: `${pWG}%` }} className="bg-orange-500" title={`WG Actions: ${kpis.breakdown.wgActions}`} />
+          </div>
+      );
+  };
+
   return (
-    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in relative">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in relative pb-10">
+        
+        {/* ... (Admin Notifications) ... */}
+        {isAdmin && adminNotifications.length > 0 && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-md border border-indigo-100 dark:border-indigo-900/30 overflow-hidden">
+                {/* ... existing notification code ... */}
+                <div className="p-4 bg-indigo-600 flex justify-between items-center">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                        <Bell className="w-5 h-5" /> Admin Notifications
+                    </h3>
+                    <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full">{adminNotifications.length} New</span>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {adminNotifications.map(notif => (
+                        <div key={notif.id} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-full ${notif.type === 'REPORT_SUBMITTED' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                    {notif.type === 'REPORT_SUBMITTED' ? <FileText className="w-4 h-4"/> : <Briefcase className="w-4 h-4"/>}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800 dark:text-white">{notif.title}</p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">{notif.subtitle}</p>
+                                    <span className="text-[10px] text-slate-400">{new Date(notif.timestamp).toLocaleString()}</span>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => onMarkNotificationRead(notif.id)}
+                                className="text-indigo-600 dark:text-indigo-400 text-xs font-bold border border-indigo-200 dark:border-indigo-800 px-3 py-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors flex items-center gap-1"
+                            >
+                                <Check className="w-3 h-3" /> Mark Seen
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* CROSS-FUNCTIONAL KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {/* ... (KPI Cards same as before) ... */}
+            <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">Total Active Work</p>
+                        <h3 className="text-3xl font-black text-slate-900 dark:text-white mt-1">{kpis.totalOpenActions}</h3>
+                    </div>
+                    <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg text-indigo-600 dark:text-indigo-400">
+                        <Target className="w-5 h-5" />
+                    </div>
+                </div>
+                <ActionDistribution />
+                <div className="flex justify-between text-[10px] text-slate-400 mt-2 font-medium">
+                    <span className="flex items-center"><div className="w-2 h-2 bg-blue-500 rounded-full mr-1"/>Projects</span>
+                    <span className="flex items-center"><div className="w-2 h-2 bg-purple-500 rounded-full mr-1"/>Meetings</span>
+                    <span className="flex items-center"><div className="w-2 h-2 bg-orange-500 rounded-full mr-1"/>WG</span>
+                </div>
+            </div>
+            
+            {/* ... Other KPI Cards ... */}
+            <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-start mb-2">
+                    <div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">Total Blocked</p>
+                        <h3 className={`text-3xl font-black mt-1 ${kpis.totalBlocked > 0 ? 'text-red-600' : 'text-emerald-500'}`}>{kpis.totalBlocked}</h3>
+                    </div>
+                    <div className={`p-2 rounded-lg ${kpis.totalBlocked > 0 ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20'}`}>
+                        <AlertTriangle className="w-5 h-5" />
+                    </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                    <span className="font-bold">{kpis.alerts.blockedTasks}</span> from tasks, <span className="font-bold">{kpis.totalBlocked - kpis.alerts.blockedTasks}</span> from meetings/WGs.
+                </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-start mb-2">
+                    <div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">Weekly Activity</p>
+                        <h3 className="text-3xl font-black text-slate-900 dark:text-white mt-1">{kpis.totalActivity}</h3>
+                    </div>
+                    <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600 dark:text-blue-400">
+                        <Activity className="w-5 h-5" />
+                    </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                    Sessions & Meetings held in the last 7 days.
+                </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-start mb-2">
+                    <div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wide">Pending Reports</p>
+                        <h3 className="text-3xl font-black text-slate-900 dark:text-white mt-1">{kpis.pendingReports}</h3>
+                    </div>
+                    <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-amber-600 dark:text-amber-400">
+                        <FileText className="w-5 h-5" />
+                    </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                    Reports waiting for manager validation.
+                </p>
+            </div>
+        </div>
+
+        {/* ALERTS & RISKS SECTION (Consolidated) */}
+        {(kpis.alerts.overdueProjects > 0 || kpis.totalBlocked > 0) && (
+            <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 p-4 rounded-xl flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5" />
+                <div>
+                    <h4 className="text-sm font-bold text-red-800 dark:text-red-300">Critical Attention Required</h4>
+                    <ul className="mt-1 text-xs text-red-700 dark:text-red-400 list-disc list-inside">
+                        {kpis.alerts.overdueProjects > 0 && <li><strong>{kpis.alerts.overdueProjects}</strong> Projects are Overdue.</li>}
+                        {kpis.totalBlocked > 0 && <li><strong>{kpis.totalBlocked}</strong> Action items are currently Blocked.</li>}
+                    </ul>
+                </div>
+            </div>
+        )}
+
+        {/* Quick Actions & AI Bar */}
+        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap gap-4 items-center justify-between">
+             <div className="flex items-center gap-2">
+                 <span className="text-sm font-bold text-slate-500 uppercase tracking-wide mr-2">Quick Actions:</span>
+                 <button 
+                    onClick={() => setShowQuickCreate('project')}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors text-sm font-medium"
+                 >
+                     <Briefcase className="w-4 h-4" /> New Project
+                 </button>
+                 <button 
+                    onClick={() => setShowQuickCreate('task')}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors text-sm font-medium"
+                 >
+                     <CheckCircle2 className="w-4 h-4" /> New Task
+                 </button>
+             </div>
+
+             <div className="flex gap-3 items-center">
+                {/* Language Toggle */}
+                <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1 border border-slate-200 dark:border-slate-600">
+                    <button 
+                        onClick={() => setAiLang('en')}
+                        className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'en' ? 'bg-white dark:bg-slate-600 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-500'}`}
+                    >EN</button>
+                    <button 
+                        onClick={() => setAiLang('fr')}
+                        className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'fr' ? 'bg-white dark:bg-slate-600 shadow-sm text-indigo-600 dark:text-indigo-400' : 'text-slate-500'}`}
+                    >FR</button>
+                </div>
+
+                <button 
+                    onClick={handleManagerAdvice}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all text-sm font-bold"
+                >
+                    <ShieldAlert className="w-4 h-4 fill-current" />
+                    Manager Advise
+                </button>
+
+                <button 
+                    onClick={handleGenerateInsight}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all text-sm font-bold"
+                >
+                    <Zap className="w-4 h-4 fill-current" />
+                    AI Team Synthesis
+                </button>
+             </div>
+        </div>
+
+        {/* ... (Chart) ... */}
+        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-indigo-500" />
+                    Team Workload Distribution
+                </h3>
+                {/* Legend */}
+                <div className="flex gap-4">
+                    <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-emerald-500 rounded-full mr-2"></span>Done</div>
+                    <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>In Progress</div>
+                    <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>Blocked</div>
+                    <div className="flex items-center text-xs text-slate-600 dark:text-slate-300"><span className="w-3 h-3 bg-slate-300 dark:bg-slate-600 rounded-full mr-2"></span>To Do</div>
+                </div>
+            </div>
+
+            <div className="space-y-8">
+                {teams.map(team => {
+                    // Sort projects by active status first, then name
+                    const sortedProjects = [...team.projects].sort((a,b) => {
+                        if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
+                        return a.name.localeCompare(b.name);
+                    });
+
+                    return (
+                        <div key={team.id} className="space-y-4">
+                            <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2 mb-3">
+                                {team.name}
+                            </h4>
+                            {sortedProjects.map(project => {
+                                // Filter out archived projects if needed, or keep them with a visual cue
+                                if (project.isArchived) return null;
+
+                                let tDone = 0, tProg = 0, tBlock = 0, tTodo = 0;
+                                project.tasks.forEach(t => {
+                                    if(t.status === TaskStatus.DONE) tDone++;
+                                    else if(t.status === TaskStatus.ONGOING) tProg++;
+                                    else if(t.status === TaskStatus.BLOCKED) tBlock++;
+                                    else tTodo++;
+                                });
+                                const tTotal = tDone + tProg + tBlock + tTodo;
+
+                                return (
+                                    <div key={project.id} className="grid grid-cols-12 gap-4 items-center group">
+                                        <div className="col-span-3">
+                                            <span className="font-medium text-sm text-slate-700 dark:text-slate-200 truncate block" title={project.name}>
+                                                {project.name}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-8">
+                                            {tTotal > 0 ? (
+                                                <div className="h-3 w-full bg-slate-100 dark:bg-slate-700 rounded-full flex overflow-hidden">
+                                                    {tDone > 0 && <div style={{width: `${(tDone/tTotal)*100}%`}} className="bg-emerald-500 h-full" title={`Done: ${tDone}`}></div>}
+                                                    {tProg > 0 && <div style={{width: `${(tProg/tTotal)*100}%`}} className="bg-blue-500 h-full" title={`In Progress: ${tProg}`}></div>}
+                                                    {tBlock > 0 && <div style={{width: `${(tBlock/tTotal)*100}%`}} className="bg-red-500 h-full" title={`Blocked: ${tBlock}`}></div>}
+                                                    {tTodo > 0 && <div style={{width: `${(tTodo/tTotal)*100}%`}} className="bg-slate-300 dark:bg-slate-600 h-full" title={`Todo: ${tTodo}`}></div>}
+                                                </div>
+                                            ) : (
+                                                <div className="h-3 w-full bg-slate-50 dark:bg-slate-800 rounded-full border border-dashed border-slate-200 dark:border-slate-700"></div>
+                                            )}
+                                        </div>
+                                        <div className="col-span-1 text-right">
+                                            <span className="text-xs font-mono text-slate-400">{tTotal} tasks</span>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                            {sortedProjects.filter(p => !p.isArchived).length === 0 && (
+                                <p className="text-xs text-slate-400 italic pl-2">No active projects.</p>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+
+        {/* ... (AI Modal, Quick Create Modal, Report Modal logic remains same) ... */}
         
         {/* AI Insight Modal */}
         {showAiModal && (
@@ -263,6 +571,8 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
              </div>
         )}
 
+        {/* ... (Quick Create Modal and Review Report Modal same as before) ... */}
+        
         {/* Quick Create Modal */}
         {showQuickCreate !== 'none' && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -310,7 +620,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
                                         className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                                     >
                                         <option value="">-- Choose Project --</option>
-                                        {teams.find(t => t.id === quickTeamId)?.projects.map(p => (
+                                        {teams.find(t => t.id === quickTeamId)?.projects.filter(p => !p.isArchived).map(p => (
                                             <option key={p.id} value={p.id}>{p.name}</option>
                                         ))}
                                     </select>
@@ -361,70 +671,6 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
              </div>
         )}
         
-        {/* Top Alerts Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-red-50 dark:bg-red-900/20 p-6 rounded-2xl border border-red-100 dark:border-red-800 flex items-center justify-between">
-                <div>
-                    <p className="text-red-600 dark:text-red-400 font-bold uppercase text-xs tracking-wider">Blocked Tasks</p>
-                    <p className="text-3xl font-black text-red-700 dark:text-red-300 mt-1">{alerts.blockedTasks}</p>
-                </div>
-                <AlertTriangle className="w-10 h-10 text-red-400 opacity-50" />
-            </div>
-            <div className="bg-amber-50 dark:bg-amber-900/20 p-6 rounded-2xl border border-amber-100 dark:border-amber-800 flex items-center justify-between">
-                <div>
-                    <p className="text-amber-600 dark:text-amber-400 font-bold uppercase text-xs tracking-wider">Overdue Projects</p>
-                    <p className="text-3xl font-black text-amber-700 dark:text-amber-300 mt-1">{alerts.overdueProjects}</p>
-                </div>
-                <Clock className="w-10 h-10 text-amber-400 opacity-50" />
-            </div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between">
-                <div>
-                    <p className="text-blue-600 dark:text-blue-400 font-bold uppercase text-xs tracking-wider">Reports to Review</p>
-                    <p className="text-3xl font-black text-blue-700 dark:text-blue-300 mt-1">{alerts.pendingReports}</p>
-                </div>
-                <FileText className="w-10 h-10 text-blue-400 opacity-50" />
-            </div>
-        </div>
-
-        {/* Quick Actions & AI Bar */}
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap gap-4 items-center justify-between">
-             <div className="flex items-center gap-2">
-                 <span className="text-sm font-bold text-slate-500 uppercase tracking-wide mr-2">Quick Actions:</span>
-                 <button 
-                    onClick={() => setShowQuickCreate('project')}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors text-sm font-medium"
-                 >
-                     <Briefcase className="w-4 h-4" /> New Project
-                 </button>
-                 <button 
-                    onClick={() => setShowQuickCreate('task')}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors text-sm font-medium"
-                 >
-                     <CheckCircle2 className="w-4 h-4" /> New Task
-                 </button>
-             </div>
-
-             <div className="flex gap-3">
-                <button 
-                    onClick={handleManagerAdvice}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all text-sm font-bold"
-                >
-                    <ShieldAlert className="w-4 h-4 fill-current" />
-                    Manager Advise
-                </button>
-
-                <button 
-                    onClick={handleGenerateInsight}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all text-sm font-bold"
-                >
-                    <Zap className="w-4 h-4 fill-current" />
-                    AI Team Synthesis
-                </button>
-             </div>
-        </div>
-
-        {/* ... Rest of the component (Grid, etc.) ... */}
-        
         {/* Modal Review Report */}
         {selectedReport && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -442,6 +688,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ teams, users,
                     </div>
                     
                     <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                        {/* ... (Report Content) ... */}
                         <div className="flex gap-4 mb-2">
                             {selectedReport.teamHealth && (
                                 <div className={`px-3 py-1 rounded-full text-xs font-bold text-white ${getHealthColor(selectedReport.teamHealth)}`}>

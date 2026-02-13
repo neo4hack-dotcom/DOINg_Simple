@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
-import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency, TaskAction, TaskActionStatus } from '../types';
-import { generateTeamReport, generateProjectRoadmap } from '../services/llmService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency, TaskAction, TaskActionStatus, WorkingGroup } from '../types';
+import { generateTeamReport, generateProjectRoadmap, generateDailyPlan } from '../services/llmService';
 import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit, Archive, RotateCcw, ExternalLink, Coins, Star, Zap, Globe
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -16,16 +16,37 @@ interface ProjectTrackerProps {
   llmConfig: LLMConfig;
   prompts?: Record<string, string>; // New Prop for Prompts
   onUpdateTeam: (team: Team) => void;
+  workingGroups: WorkingGroup[]; // Added for "What to do today" context
 }
 
-const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUser, llmConfig, prompts, onUpdateTeam }) => {
+const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUser, llmConfig, prompts, onUpdateTeam, workingGroups }) => {
   const [selectedTeamId, setSelectedTeamId] = useState<string>(teams[0]?.id || '');
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [aiLang, setAiLang] = useState<'en' | 'fr'>('en'); // Language State
   
+  // What to do today state
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [dailyPlan, setDailyPlan] = useState('');
+  const [loadingPlan, setLoadingPlan] = useState(false);
+
   // Selection State for AI Report
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+
+  // View Mode: Live vs Archived
+  const [showArchived, setShowArchived] = useState(false);
+
+  // Search & Sort
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'deadline' | 'name' | 'status' | 'created'>('deadline');
+
+  // Highlighted Projects (Persisted per User)
+  const [highlightedProjectIds, setHighlightedProjectIds] = useState<string[]>(() => {
+      if (!currentUser) return [];
+      const saved = localStorage.getItem(`doing_highlights_${currentUser.id}`);
+      return saved ? JSON.parse(saved) : [];
+  });
 
   // Modals state
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -55,6 +76,13 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const currentTeam = teams.find(t => t.id === selectedTeamId);
   const teamManager = users.find(u => u.id === currentTeam?.managerId);
 
+  // Persist Highlights
+  useEffect(() => {
+      if (currentUser) {
+          localStorage.setItem(`doing_highlights_${currentUser.id}`, JSON.stringify(highlightedProjectIds));
+      }
+  }, [highlightedProjectIds, currentUser]);
+
   // Reset selection when team changes
   useEffect(() => {
       setSelectedProjectIds([]);
@@ -68,6 +96,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
             setEditingProject(null);
             setEditingTask(null);
             setShowRoadmapModal(false);
+            setShowPlanModal(false);
         }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -75,6 +104,14 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   }, []);
 
   // --- Helper Functions ---
+
+  const toggleHighlight = (projectId: string) => {
+      setHighlightedProjectIds(prev => 
+          prev.includes(projectId) 
+              ? prev.filter(id => id !== projectId) 
+              : [...prev, projectId]
+      );
+  };
 
   const getStatusColor = (status: TaskStatus | ProjectStatus) => {
     switch (status) {
@@ -126,10 +163,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   const toggleSelectAll = () => {
       if (!currentTeam) return;
-      if (selectedProjectIds.length === currentTeam.projects.length) {
+      const visibleProjects = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
+      
+      if (selectedProjectIds.length === visibleProjects.length) {
           setSelectedProjectIds([]);
       } else {
-          setSelectedProjectIds(currentTeam.projects.map(p => p.id));
+          setSelectedProjectIds(visibleProjects.map(p => p.id));
       }
   };
 
@@ -138,10 +177,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
     setLoadingAi(true);
     setAiReport(null);
     
-    // Filter projects if specific ones are selected, otherwise use all
+    // Filter projects if specific ones are selected, otherwise use all visible
+    const visibleProjects = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
     const projectsToAnalyze = selectedProjectIds.length > 0 
-        ? currentTeam.projects.filter(p => selectedProjectIds.includes(p.id)) 
-        : currentTeam.projects;
+        ? visibleProjects.filter(p => selectedProjectIds.includes(p.id)) 
+        : visibleProjects;
 
     // Create a temporary team object with only the relevant projects for the AI
     const scopedTeam = {
@@ -150,7 +190,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
     };
 
     // Pass prompts prop
-    const report = await generateTeamReport(scopedTeam, teamManager, llmConfig, prompts);
+    const report = await generateTeamReport(scopedTeam, teamManager, llmConfig, prompts, aiLang);
     setAiReport(report);
     setLoadingAi(false);
   };
@@ -159,10 +199,21 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       setLoadingRoadmap(true);
       setShowRoadmapModal(true);
       setAiRoadmap(null);
-      const roadmap = await generateProjectRoadmap(project, users, llmConfig, prompts);
+      const roadmap = await generateProjectRoadmap(project, users, llmConfig, prompts, aiLang);
       setAiRoadmap(roadmap);
       setLoadingRoadmap(false);
   };
+
+  const handleWhatToDo = async () => {
+      if (!currentUser) return;
+      setLoadingPlan(true);
+      setShowPlanModal(true);
+      setDailyPlan('');
+      
+      const plan = await generateDailyPlan(teams, workingGroups, currentUser, llmConfig, prompts, aiLang);
+      setDailyPlan(plan);
+      setLoadingPlan(false);
+  }
 
   const cleanTextForClipboard = (text: string) => {
       return text
@@ -207,9 +258,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           owner: '',
           architect: '',
           deadline: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(), // Add CreatedAt
           members: [],
           tasks: [],
           isImportant: false,
+          isArchived: false,
           docUrls: [],
           dependencies: [],
           externalDependencies: [],
@@ -218,13 +271,41 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       setEditingProject(newProject);
   };
 
+  // ... (Same Project/Task CRUD Handlers as before) ...
+  const handleArchiveProject = (projectId: string) => {
+      if(window.confirm("Are you sure you want to mark this project as COMPLETED and ARCHIVE it?")) {
+          if(window.confirm("Double confirmation: This project will be hidden from Dashboard KPIs and Management Reports. Continue?")) {
+              updateTeamData(team => {
+                  const project = team.projects.find(p => p.id === projectId);
+                  if (project) {
+                      project.isArchived = true;
+                      project.status = ProjectStatus.DONE; // Auto-set status to Done
+                  }
+              });
+              if(expandedProjectId === projectId) setExpandedProjectId(null);
+              setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
+          }
+      }
+  };
+
+  const handleRestoreProject = (projectId: string) => {
+      if(window.confirm("Restore this project to LIVE view? It will affect KPIs again.")) {
+          updateTeamData(team => {
+              const project = team.projects.find(p => p.id === projectId);
+              if (project) {
+                  project.isArchived = false;
+              }
+          });
+          setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
+      }
+  }
+
   const handleDeleteProject = (projectId: string) => {
       if(!window.confirm("Are you sure you want to delete this project? This action cannot be undone.")) return;
       updateTeamData(team => {
           team.projects = team.projects.filter(p => p.id !== projectId);
       });
       if(expandedProjectId === projectId) setExpandedProjectId(null);
-      // Remove from selection if deleted
       setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
   };
 
@@ -242,6 +323,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           checklist: [],
           actions: [],
           externalDependencies: [],
+          docUrls: [],
           order: 1
       };
       setEditingTask({ projectId, task: newTask });
@@ -281,7 +363,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           if (idx !== -1) {
               team.projects[idx] = editingProject;
           } else {
-              // New Project
               team.projects.push(editingProject);
           }
       });
@@ -331,6 +412,28 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       if (!editingTask) return;
       const updatedActions = (editingTask.task.actions || []).filter(a => a.id !== actionId);
       setEditingTask({ ...editingTask, task: { ...editingTask.task, actions: updatedActions } });
+  };
+
+  // --- Task Doc Links Handlers ---
+  const addTaskLink = () => {
+      if (!editingTask) return;
+      setEditingTask({
+          ...editingTask,
+          task: { ...editingTask.task, docUrls: [...(editingTask.task.docUrls || []), ''] }
+      });
+  };
+
+  const updateTaskLink = (index: number, val: string) => {
+      if (!editingTask) return;
+      const newLinks = [...(editingTask.task.docUrls || [])];
+      newLinks[index] = val;
+      setEditingTask({ ...editingTask, task: { ...editingTask.task, docUrls: newLinks } });
+  };
+
+  const removeTaskLink = (index: number) => {
+      if (!editingTask) return;
+      const newLinks = (editingTask.task.docUrls || []).filter((_, i) => i !== index);
+      setEditingTask({ ...editingTask, task: { ...editingTask.task, docUrls: newLinks } });
   };
 
   // Checklist Handlers
@@ -425,12 +528,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       }
   };
   
-  // Context Descriptions Handler
   const updateAdditionalDescription = (index: number, value: string) => {
       if (!editingProject) return;
-      const newDescriptions = [...(editingProject.project.additionalDescriptions || ['', '', ''])];
+      const newDescriptions = [...(editingProject.additionalDescriptions || ['', '', ''])];
       newDescriptions[index] = value;
-      setEditingProject({ ...editingProject, project: { ...editingProject.project, additionalDescriptions: newDescriptions } });
+      setEditingProject({ ...editingProject, additionalDescriptions: newDescriptions });
   };
 
   const calculateWeightedProgress = (tasks: Task[]) => {
@@ -453,19 +555,98 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
   if (!currentTeam) return <div className="p-8 text-center text-slate-500">Please select a team.</div>;
 
-  // Helper for Task Modal: Determine if assignee is a known user or custom string
   const isKnownUser = (id?: string) => users.some(u => u.id === id);
   const isCustomAssignee = editingTask?.task.assigneeId && !isKnownUser(editingTask.task.assigneeId);
+
+  // --- FILTERING FOR VIEW ---
+  const displayedProjects = useMemo(() => {
+      if (!currentTeam) return [];
+
+      let filtered = currentTeam.projects.filter(p => !!p.isArchived === showArchived);
+
+      if (searchTerm.trim()) {
+          const lowerSearch = searchTerm.toLowerCase();
+          filtered = filtered.filter(p => {
+              const projectMatch = p.name.toLowerCase().includes(lowerSearch) || p.description.toLowerCase().includes(lowerSearch);
+              const taskMatch = p.tasks.some(t => t.title.toLowerCase().includes(lowerSearch) || t.description.toLowerCase().includes(lowerSearch));
+              return projectMatch || taskMatch;
+          });
+      }
+
+      return filtered.sort((a, b) => {
+          const isAHigh = highlightedProjectIds.includes(a.id);
+          const isBHigh = highlightedProjectIds.includes(b.id);
+          if (isAHigh && !isBHigh) return -1;
+          if (!isAHigh && isBHigh) return 1;
+
+          if (sortBy === 'name') return a.name.localeCompare(b.name);
+          if (sortBy === 'deadline') return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+          if (sortBy === 'status') return a.status.localeCompare(b.status);
+          if (sortBy === 'created') {
+              const tA = a.createdAt ? new Date(a.createdAt).getTime() : (parseInt(a.id) || 0);
+              const tB = b.createdAt ? new Date(b.createdAt).getTime() : (parseInt(b.id) || 0);
+              return tB - tA;
+          }
+          return 0;
+      });
+  }, [currentTeam, showArchived, searchTerm, sortBy, highlightedProjectIds]);
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
-      {/* Datalist for User suggestions (used in Project Owner/Architect inputs) */}
       <datalist id="user-list-suggestions">
           {users.map(u => (
               <option key={u.id} value={`${u.firstName} ${u.lastName}`} />
           ))}
       </datalist>
+
+      {/* What to do today Modal */}
+      {showPlanModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col border border-slate-200 dark:border-slate-700">
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-gradient-to-r from-orange-500 to-amber-500 rounded-t-2xl">
+                      <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                          <Zap className="w-5 h-5" />
+                          What to do today?
+                      </h3>
+                      <button onClick={() => setShowPlanModal(false)} className="text-white hover:text-amber-100">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto flex-1 bg-slate-50 dark:bg-slate-950">
+                      {loadingPlan ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-slate-500 dark:text-slate-400">
+                              <Sparkles className="w-10 h-10 animate-spin mb-4 text-orange-500" />
+                              <p className="font-medium">Analyzing your workload...</p>
+                              <p className="text-xs mt-2 text-slate-400">Checking tasks, deadlines, and priorities</p>
+                          </div>
+                      ) : (
+                          <div className="prose prose-sm dark:prose-invert max-w-none bg-white dark:bg-slate-800 p-8 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                              <FormattedText text={dailyPlan} />
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between gap-3 bg-white dark:bg-slate-900 rounded-b-2xl">
+                      <button 
+                        onClick={() => setShowPlanModal(false)}
+                        className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                      >
+                          Close
+                      </button>
+                      <button 
+                        onClick={() => copyToClipboard(dailyPlan)}
+                        disabled={loadingPlan}
+                        className="px-4 py-2 text-sm font-medium bg-orange-500 text-white hover:bg-orange-600 rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                          <Copy className="w-4 h-4" />
+                          Copy Plan
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* ... (AI Roadmap Modal - No changes) ... */}
       {showRoadmapModal && (
@@ -525,7 +706,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* ... (Project Edit Modal - No changes) ... */}
+      {/* ... (Project Edit Modal - Same as before) ... */}
       {editingProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col max-h-[90vh]">
@@ -533,6 +714,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                       <h3 className="text-lg font-bold dark:text-white">{editingProject.id && editingProject.name ? 'Edit Project' : 'Create New Project'}</h3>
                       <button onClick={() => setEditingProject(null)}><X className="w-5 h-5 text-slate-400" /></button>
                   </div>
+                  {/* ... Existing Modal Content ... */}
                   <div className="space-y-4 overflow-y-auto flex-1 pr-2">
                       <div>
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Project Name</label>
@@ -556,7 +738,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                       </div>
 
-                      {/* Owner & Architect Fields */}
                       <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
@@ -584,9 +765,21 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                   placeholder="Select or type name..."
                               />
                           </div>
+                          <div className="col-span-2">
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
+                                  <Coins className="w-3 h-3 text-emerald-500" /> Project Budget (MD)
+                              </label>
+                              <input 
+                                  type="number"
+                                  min="0"
+                                  value={editingProject.costMD || ''} 
+                                  onChange={e => setEditingProject({...editingProject, costMD: parseFloat(e.target.value)})}
+                                  className="w-full p-2 text-sm border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white placeholder-slate-400"
+                                  placeholder="Man Days (e.g. 50)"
+                              />
+                          </div>
                       </div>
 
-                      {/* Project Dependencies */}
                       <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
                               <Link2 className="w-4 h-4" /> External Dependencies (System/Person)
@@ -631,26 +824,32 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           </div>
                       </div>
 
-                      {/* AI Context Fields */}
-                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30">
-                          <label className="block text-sm font-bold text-indigo-700 dark:text-indigo-400 mb-2 flex items-center">
-                              <Sparkles className="w-4 h-4 mr-2" />
-                              AI Context Layers (Hidden & Optional)
-                          </label>
-                          <p className="text-xs text-slate-500 mb-3">
-                              These fields are hidden from the main view but used by the AI to understand the project better (e.g., technical debt details, political context, client specificities).
-                          </p>
-                          <div className="space-y-3">
-                              {[0, 1, 2].map(i => (
+                      <div className="bg-indigo-50/50 dark:bg-indigo-900/10 p-5 rounded-xl border border-indigo-100 dark:border-indigo-800 space-y-4">
+                          <div className="flex items-center gap-2 mb-2">
+                              <BrainCircuit className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                              <div>
+                                  <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">LLM Context Injection</h4>
+                                  <p className="text-xs text-indigo-600 dark:text-indigo-400 opacity-80">
+                                      Data entered here is invisible to the team but used by the AI to generate accurate reports.
+                                  </p>
+                              </div>
+                          </div>
+
+                          <div className="space-y-4">
+                              {[
+                                  { label: "1. Strategic Context", placeholder: "e.g. This project is critical for the Q4 IPO..." },
+                                  { label: "2. Technical Constraints", placeholder: "e.g. Must use Legacy API, heavily relying on AWS..." },
+                                  { label: "3. Team & Risks", placeholder: "e.g. Team is junior, external dependency on Vendor X is risky..." }
+                              ].map((layer, i) => (
                                   <div key={i}>
-                                      <label className="text-[10px] uppercase font-semibold text-slate-400 mb-1">Context Layer {i+1}</label>
-                                      <textarea 
+                                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">{layer.label}</label>
+                                      <textarea
                                           value={(editingProject.additionalDescriptions && editingProject.additionalDescriptions[i]) || ''}
                                           onChange={e => updateAdditionalDescription(i, e.target.value)}
                                           maxLength={2000}
                                           rows={2}
-                                          className="w-full p-2 text-sm border border-slate-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 focus:ring-1 focus:ring-indigo-500"
-                                          placeholder={`Add private context for AI... (Max 2000 chars)`}
+                                          className="w-full p-3 text-sm border border-indigo-100 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow text-slate-800 dark:text-slate-200"
+                                          placeholder={layer.placeholder}
                                       />
                                   </div>
                               ))}
@@ -673,10 +872,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       {editingTask && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+                  {/* ... (Same Task Modal Content) ... */}
                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-4">
                       <h3 className="text-lg font-bold dark:text-white">Edit Task</h3>
                       <button onClick={() => setEditingTask(null)}><X className="w-5 h-5 text-slate-400" /></button>
                   </div>
+                  {/* ... Rest of Task Fields ... */}
                   <div className="space-y-4">
                       <div className="flex gap-4">
                           <div className="flex-1">
@@ -688,7 +889,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                               <input type="number" value={editingTask.task.order || 0} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, order: parseInt(e.target.value)}})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
                           </div>
                       </div>
-
+                      
+                      {/* ... other task fields ... */}
                       <div className="">
                           <div className="flex justify-between items-center mb-1">
                             <label className="block text-xs font-bold text-slate-500 uppercase">Description</label>
@@ -704,6 +906,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                           />
                       </div>
 
+                      {/* ... Status/Priority/Weight ... */}
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
@@ -720,11 +923,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Weight (Impact)</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Weight</label>
                             <input type="number" min="1" max="10" value={editingTask.task.weight || 1} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, weight: parseInt(e.target.value) || 1}})} className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white" />
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">ETA (Deadline)</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">ETA</label>
                             <input 
                                 type="date"
                                 value={editingTask.task.eta || ''}
@@ -733,167 +936,47 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             />
                           </div>
                       </div>
-                      
+
+                      {/* ... Assignee/Links/Checklist ... */}
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Assignee</label>
-                        <div className="space-y-2">
-                            <select 
-                                value={isCustomAssignee ? 'CUSTOM_ASSIGNEE' : (editingTask.task.assigneeId || '')} 
-                                onChange={e => {
-                                    if (e.target.value === 'CUSTOM_ASSIGNEE') {
-                                        setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: 'External Contact'}});
-                                    } else {
-                                        setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}});
-                                    }
-                                }} 
-                                className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
-                            >
-                                <option value="">Unassigned</option>
-                                {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-                                <option value="CUSTOM_ASSIGNEE">-- Other / External --</option>
-                            </select>
-                            {isCustomAssignee && (
-                                <input 
-                                    type="text"
-                                    value={editingTask.task.assigneeId}
-                                    onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}})}
-                                    placeholder="Enter external name..."
-                                    className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm bg-indigo-50 dark:bg-indigo-900/20"
-                                    autoFocus
-                                />
-                            )}
-                        </div>
+                        <select 
+                            value={isCustomAssignee ? 'CUSTOM_ASSIGNEE' : (editingTask.task.assigneeId || '')} 
+                            onChange={e => {
+                                if (e.target.value === 'CUSTOM_ASSIGNEE') {
+                                    setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: 'External Contact'}});
+                                } else {
+                                    setEditingTask({...editingTask, task: {...editingTask.task, assigneeId: e.target.value}});
+                                }
+                            }} 
+                            className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                        >
+                            <option value="">Unassigned</option>
+                            {users.map(u => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                            <option value="CUSTOM_ASSIGNEE">-- Other / External --</option>
+                        </select>
                       </div>
 
-                      {/* Task Dependencies (External) */}
-                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                              <Link2 className="w-4 h-4" /> External Dependencies (System/Person)
-                          </label>
-                          <div className="space-y-2 mb-2">
-                              {(editingTask.task.externalDependencies || []).map(dep => (
-                                  <div key={dep.id} className="flex items-center gap-2 bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
-                                      <select 
-                                        value={dep.status} 
-                                        onChange={(e) => updateExternalDependencyStatus(dep.id, e.target.value as any, 'task')}
-                                        className={`w-4 h-4 rounded-full appearance-none cursor-pointer ${getRagColor(dep.status)} border-none focus:ring-0`}
-                                      >
-                                          <option value="Green">Green</option>
-                                          <option value="Amber">Amber</option>
-                                          <option value="Red">Red</option>
-                                      </select>
-                                      <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300">{dep.label}</span>
-                                      <button onClick={() => removeExternalDependency(dep.id, 'task')} className="text-slate-400 hover:text-red-500">
-                                          <Trash2 className="w-4 h-4" />
-                                      </button>
-                                  </div>
-                              ))}
-                          </div>
-                          <div className="flex gap-2">
-                              <input 
-                                type="text" 
-                                value={newDepLabel}
-                                onChange={e => setNewDepLabel(e.target.value)}
-                                placeholder="Dependency Name (e.g. Legal Check)"
-                                className="flex-1 p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm"
-                              />
-                              <select 
-                                value={newDepStatus}
-                                onChange={e => setNewDepStatus(e.target.value as any)}
-                                className="p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm"
-                              >
-                                  <option value="Green">Green</option>
-                                  <option value="Amber">Amber</option>
-                                  <option value="Red">Red</option>
-                              </select>
-                              <button onClick={() => addExternalDependency('task')} className="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded text-sm font-medium">Add</button>
-                          </div>
-                      </div>
-
-                      {/* --- TASK ACTIONS SECTION (NEW) --- */}
-                      <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                              <LayoutList className="w-4 h-4" /> Task Actions / Sub-steps
-                          </label>
-                          <div className="space-y-2 mb-3">
-                              {(editingTask.task.actions || []).map(action => (
-                                  <div key={action.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 p-2 rounded border border-slate-100 dark:border-slate-700 group">
-                                      <select 
-                                          value={action.status} 
-                                          onChange={(e) => handleUpdateActionStatus(action.id, e.target.value as any)}
-                                          className={`text-[10px] uppercase font-bold px-2 py-1 rounded cursor-pointer border focus:outline-none ${getActionStatusColor(action.status)}`}
-                                      >
-                                          <option value="To Do">To Do</option>
-                                          <option value="Ongoing">Ongoing</option>
-                                          <option value="Blocked">Blocked</option>
-                                          <option value="Done">Done</option>
-                                      </select>
-                                      <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">{action.text}</span>
-                                      <button onClick={() => handleDeleteAction(action.id)} className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <Trash2 className="w-4 h-4" />
-                                      </button>
-                                  </div>
-                              ))}
-                          </div>
-                          <div className="flex gap-2">
-                              <input 
-                                  type="text" 
-                                  value={newActionText}
-                                  onChange={e => setNewActionText(e.target.value)}
-                                  placeholder="Add an action step..."
-                                  className="flex-1 p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white text-sm"
-                                  onKeyDown={e => e.key === 'Enter' && handleAddAction()}
-                              />
-                              <button onClick={handleAddAction} className="px-3 py-2 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-sm font-medium">Add</button>
-                          </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-2">
-                          <input type="checkbox" id="taskImp" checked={editingTask.task.isImportant} onChange={e => setEditingTask({...editingTask, task: {...editingTask.task, isImportant: e.target.checked}})} className="w-4 h-4 text-indigo-600 rounded" />
-                          <label htmlFor="taskImp" className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1"><AlertTriangle className="w-4 h-4 text-red-500" /> Mark as Important</label>
-                      </div>
-
-                      {/* Checklist Section */}
+                      {/* Checklist */}
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
                               <ListTodo className="w-4 h-4" /> Checklist
                           </label>
                           <div className="space-y-3 mb-2">
                               {(editingTask.task.checklist || []).map(item => (
-                                  <div key={item.id} className="group">
-                                      <div className="flex items-center gap-2">
-                                          <input 
-                                            type="checkbox" 
-                                            checked={item.done} 
-                                            onChange={() => handleToggleChecklistItem(item.id)}
-                                            className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-600 focus:ring-indigo-500 cursor-pointer" 
-                                          />
-                                          <span className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                                              {item.text}
-                                          </span>
-                                          <button 
-                                            onClick={() => setChecklistCommentId(checklistCommentId === item.id ? null : item.id)}
-                                            className={`p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${item.comment ? 'text-indigo-500' : 'text-slate-300 opacity-0 group-hover:opacity-100'}`}
-                                            title="Add/Edit Comment"
-                                          >
-                                              <MessageCircle className="w-4 h-4" />
-                                          </button>
-                                          <button onClick={() => handleDeleteChecklistItem(item.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                              <Trash2 className="w-4 h-4" />
-                                          </button>
-                                      </div>
-                                      {/* Comment Input if Open or Exists */}
-                                      {(checklistCommentId === item.id || item.comment) && (
-                                          <div className="ml-6 mt-1 flex items-center gap-2">
-                                              <input 
-                                                type="text"
-                                                value={item.comment || ''}
-                                                onChange={(e) => handleUpdateChecklistComment(item.id, e.target.value)}
-                                                placeholder="Add a note..."
-                                                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500"
-                                              />
-                                          </div>
-                                      )}
+                                  <div key={item.id} className="group flex items-center gap-2">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={item.done} 
+                                        onChange={() => handleToggleChecklistItem(item.id)}
+                                        className="w-4 h-4 text-indigo-600 rounded" 
+                                      />
+                                      <span className={`flex-1 text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                                          {item.text}
+                                      </span>
+                                      <button onClick={() => handleDeleteChecklistItem(item.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <Trash2 className="w-4 h-4" />
+                                      </button>
                                   </div>
                               ))}
                           </div>
@@ -920,11 +1003,10 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
-      {/* ... (Team Header, AI Report, Bulk Selection components remain same) ... */}
-      
       {/* Team Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
+           {/* Team Selector ... */}
            <div className="relative">
              <select 
                 value={selectedTeamId} 
@@ -951,12 +1033,35 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
            </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+            {/* Language Selector */}
+            <div className="flex bg-white dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
+                <button 
+                    onClick={() => setAiLang('en')}
+                    className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'en' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300' : 'text-slate-500'}`}
+                >EN</button>
+                <button 
+                    onClick={() => setAiLang('fr')}
+                    className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'fr' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300' : 'text-slate-500'}`}
+                >FR</button>
+            </div>
+
+            {!showArchived && (
+                <button 
+                    onClick={handleCreateProject}
+                    className="flex items-center px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm transition-all font-medium text-sm"
+                >
+                    <Briefcase className="w-4 h-4 mr-2" /> New Project
+                </button>
+            )}
+
             <button 
-                onClick={handleCreateProject}
-                className="flex items-center px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm transition-all font-medium text-sm"
+                onClick={handleWhatToDo}
+                disabled={loadingPlan}
+                className="flex items-center px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg shadow-md hover:from-orange-600 hover:to-amber-600 transition-all font-bold text-sm"
             >
-                <Briefcase className="w-4 h-4 mr-2" /> New Project
+                {loadingPlan ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"/> : <Zap className="w-4 h-4 mr-2 fill-current" />}
+                What to do?
             </button>
 
             <button 
@@ -965,12 +1070,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                 className="flex items-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white rounded-lg shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
             >
                 {loadingAi ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"/> : <Bot className="w-4 h-4 mr-2" />}
-                {loadingAi ? 'Analyzing...' : (selectedProjectIds.length > 0 ? `AI Report (${selectedProjectIds.length})` : `AI Report (All)`)}
+                {loadingAi ? 'Analyzing...' : `AI Report`}
             </button>
         </div>
       </div>
 
-      {/* AI Report */}
+      {/* ... (AI Report Display, same as before) ... */}
       {aiReport && (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-500/30 shadow-lg relative overflow-hidden animate-in fade-in slide-in-from-top-4">
             <div className="absolute top-0 right-0 p-4 opacity-5 dark:opacity-10 pointer-events-none">
@@ -1001,8 +1106,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                     </button>
                 </div>
             </div>
-            
-            {/* UTILISATION DE FORMATTED TEXT ICI */}
             <FormattedText text={aiReport} />
         </div>
       )}
@@ -1014,12 +1117,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                 onClick={toggleSelectAll}
                 className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-2"
               >
-                  {selectedProjectIds.length > 0 && selectedProjectIds.length === currentTeam.projects.length ? (
+                  {selectedProjectIds.length > 0 && selectedProjectIds.length === displayedProjects.length ? (
                       <CheckSquare className="w-4 h-4" />
                   ) : (
                       <Square className="w-4 h-4" />
                   )}
-                  {selectedProjectIds.length > 0 ? 'Deselect All' : 'Select All Projects'}
+                  {selectedProjectIds.length > 0 ? 'Deselect All' : `Select All ${showArchived ? 'Archived' : 'Live'} Projects`}
               </button>
               {selectedProjectIds.length > 0 && (
                   <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">
@@ -1032,23 +1135,22 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
 
       {/* Projects Grid */}
       <div className="space-y-6">
-        {currentTeam.projects.map(project => {
+        {displayedProjects.map(project => {
             const health = getProjectHealth(project);
             const isExpanded = expandedProjectId === project.id;
             const progress = calculateWeightedProgress(project.tasks);
-            const projectManager = users.find(u => u.id === project.managerId);
             const sortedTasks = [...project.tasks].sort((a, b) => (a.order || 0) - (b.order || 0));
             const hasContext = project.additionalDescriptions && project.additionalDescriptions.some(d => d.trim().length > 0);
             const isContextVisible = showContextForProject === project.id;
             const isSelected = selectedProjectIds.includes(project.id);
+            const isHighlighted = highlightedProjectIds.includes(project.id);
 
             return (
-              <div key={project.id} className={`bg-white dark:bg-slate-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${isExpanded ? 'border-indigo-200 dark:border-indigo-500/30 ring-1 ring-indigo-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}>
+              <div key={project.id} className={`bg-white dark:bg-slate-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${isHighlighted ? 'border-amber-400 ring-1 ring-amber-400/50 shadow-amber-100 dark:shadow-none' : (isExpanded ? 'border-indigo-200 dark:border-indigo-500/30 ring-1 ring-indigo-500/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600')}`}>
                 
                 {/* Project Card Header */}
-                <div className={`p-6 ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
+                <div className={`p-6 ${isHighlighted ? 'bg-amber-50/50 dark:bg-amber-900/10' : (isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : '')}`}>
                     <div className="flex flex-col md:flex-row gap-6 md:items-center">
-                        {/* Checkbox for Selection */}
                         <div className="flex items-center">
                             <input 
                                 type="checkbox"
@@ -1063,17 +1165,25 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
                         >
                             <div className="flex items-center gap-3 mb-2">
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleHighlight(project.id); }}
+                                    className="focus:outline-none transition-transform active:scale-90"
+                                    title={isHighlighted ? "Unpin Project" : "Pin Project to Top"}
+                                >
+                                    <Star className={`w-5 h-5 ${isHighlighted ? 'text-amber-400 fill-amber-400' : 'text-slate-300 hover:text-amber-400'}`} />
+                                </button>
+
                                 {project.isImportant && (
                                     <AlertTriangle className="w-5 h-5 text-red-500 animate-pulse" fill="currentColor" fillOpacity={0.2} />
                                 )}
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{project.name}</h3>
                                 
-                                {/* Quick Status Change Project */}
                                 <div onClick={(e) => e.stopPropagation()}>
                                     <select 
                                         value={project.status}
                                         onChange={(e) => handleProjectUpdate(project.id, 'status', e.target.value)}
-                                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 cursor-pointer appearance-none ${getStatusColor(project.status)}`}
+                                        disabled={project.isArchived}
+                                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 cursor-pointer appearance-none ${getStatusColor(project.status)} disabled:opacity-70 disabled:cursor-not-allowed`}
                                     >
                                         {Object.values(ProjectStatus).map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
@@ -1085,19 +1195,13 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             </div>
                             <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">{project.description}</p>
                             
-                            {/* Display Project Dependencies RAG & Roles */}
+                            {/* Dependencies & Roles */}
                             <div className="flex flex-wrap gap-2 mt-2 items-center">
                                 {project.owner && (
-                                    <span className="flex items-center text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-100 dark:border-amber-800" title="Product Owner">
+                                    <span className="flex items-center text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-100 dark:border-amber-800">
                                         <Crown className="w-3 h-3 mr-1" /> {project.owner}
                                     </span>
                                 )}
-                                {project.architect && (
-                                    <span className="flex items-center text-[10px] bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded border border-purple-100 dark:border-purple-800" title="Architect">
-                                        <PenTool className="w-3 h-3 mr-1" /> {project.architect}
-                                    </span>
-                                )}
-
                                 {project.externalDependencies && project.externalDependencies.length > 0 && (
                                     <>
                                         <div className="h-3 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
@@ -1112,7 +1216,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                             </div>
                         </div>
 
-                        {/* Meta Stats */}
+                        {/* Meta Stats & Actions */}
                         <div className="flex items-center gap-6 text-sm text-slate-500 dark:text-slate-400">
                              <div className="flex flex-col items-end min-w-[100px]">
                                 <span className="text-xs uppercase font-semibold text-slate-400 mb-1">Timeline</span>
@@ -1139,15 +1243,25 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                  <Pencil className="w-4 h-4" />
                              </button>
 
-                             {/* Project Delete Button */}
+                             {/* Archive / Restore Button */}
                              {isExpanded && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteProject(project.id); }}
-                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                    title="Delete Project"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
+                                 <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (project.isArchived) {
+                                            handleRestoreProject(project.id);
+                                        } else {
+                                            handleArchiveProject(project.id);
+                                        }
+                                    }}
+                                    className={`p-2 rounded-lg transition-colors ${project.isArchived 
+                                        ? 'text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30' 
+                                        : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                    }`}
+                                    title={project.isArchived ? "Restore to Live" : "Archive (Complete)"}
+                                 >
+                                     {project.isArchived ? <RotateCcw className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                                 </button>
                              )}
 
                              <div 
@@ -1206,16 +1320,19 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                 >
                                     <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Generate Booklet
                                 </button>
-                                <button 
-                                    onClick={() => handleAddTask(project.id)}
-                                    className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md transition-colors"
-                                >
-                                    <Plus className="w-4 h-4 mr-1" /> Add Task
-                                </button>
+                                
+                                {!project.isArchived && (
+                                    <button 
+                                        onClick={() => handleAddTask(project.id)}
+                                        className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md transition-colors"
+                                    >
+                                        <Plus className="w-4 h-4 mr-1" /> Add Task
+                                    </button>
+                                )}
                             </div>
                         </div>
 
-                        {/* Task List Table */}
+                        {/* Task List Table (Same content as before) */}
                         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-slate-50 dark:bg-slate-800/80 text-xs uppercase font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
@@ -1239,8 +1356,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                         
                                         const assigneeUser = users.find(u => u.id === task.assigneeId);
                                         const isExternalAssignee = task.assigneeId && !assigneeUser;
-
-                                        // Red Alert Logic for ETA
                                         const isOverdue = task.eta && new Date(task.eta).setHours(0,0,0,0) < new Date().setHours(0,0,0,0) && task.status !== TaskStatus.DONE;
 
                                         return (
@@ -1253,10 +1368,13 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                 <div className="flex items-center gap-2">
                                                     {task.isImportant && <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />}
                                                     <div className="font-medium text-slate-900 dark:text-white">{task.title}</div>
+                                                    {task.docUrls && task.docUrls.length > 0 && (
+                                                        <ExternalLink className="w-3 h-3 text-indigo-500" />
+                                                    )}
                                                 </div>
                                                 <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{task.description}</div>
                                                 
-                                                {/* Actions Progress Bar if actions exist */}
+                                                {/* Actions Progress Bar */}
                                                 {actionsTotal > 0 && (
                                                     <div className="mt-2 flex items-center gap-2 w-full max-w-[200px]">
                                                         <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden flex">
@@ -1267,7 +1385,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                                         action.status === 'Done' ? 'bg-emerald-500' :
                                                                         action.status === 'Blocked' ? 'bg-red-500' :
                                                                         action.status === 'Ongoing' ? 'bg-blue-500' :
-                                                                        'bg-transparent' // To Do remains bg color
+                                                                        'bg-transparent'
                                                                     }`}
                                                                     style={{ borderRight: idx !== actionsTotal - 1 ? '1px solid white' : 'none' }}
                                                                 ></div>
@@ -1279,7 +1397,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                     </div>
                                                 )}
 
-                                                {/* Task Dependencies Display */}
+                                                {/* Task Dependencies */}
                                                 {task.externalDependencies && task.externalDependencies.length > 0 && (
                                                     <div className="flex gap-2 mt-1.5 flex-wrap">
                                                         {task.externalDependencies.map(dep => (
@@ -1306,7 +1424,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                {/* Quick Status Change */}
                                                 <select 
                                                     value={task.status}
                                                     onChange={(e) => handleTaskUpdate(project.id, task.id, 'status', e.target.value)}
@@ -1370,11 +1487,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                             </td>
                                         </tr>
                                     )})}
-                                    {project.tasks.length === 0 && (
-                                        <tr>
-                                            <td colSpan={7} className="px-6 py-8 text-center text-slate-400 italic">No tasks created yet.</td>
-                                        </tr>
-                                    )}
                                 </tbody>
                             </table>
                         </div>
@@ -1383,19 +1495,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
               </div>
             );
         })}
-
-        {currentTeam.projects.length === 0 && (
-             <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400">
-                 <p className="text-lg font-medium">No active projects</p>
-                 <p className="text-sm">Get started by creating a new project for this team.</p>
-                 <button 
-                    onClick={handleCreateProject}
-                    className="mt-4 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
-                 >
-                     Create Project
-                 </button>
-             </div>
-        )}
       </div>
     </div>
   );

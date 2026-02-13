@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Team, User, Project, ProjectStatus, ProjectRole, Team as TeamType, ExternalDependency } from '../types';
-import { Search, ExternalLink, Link as LinkIcon, Users, Network, Calendar, ChevronDown, ChevronRight, LayoutGrid, List, Plus, X, Save, Trash2, Sparkles, Link2, ArrowUpDown } from 'lucide-react';
+import { Search, ExternalLink, Link as LinkIcon, Users, Network, Calendar, ChevronDown, ChevronRight, LayoutGrid, List, Plus, X, Save, Trash2, Sparkles, Link2, ArrowUpDown, History, Coins } from 'lucide-react';
 
 interface BookOfWorkProps {
     teams: Team[];
@@ -12,7 +12,7 @@ interface BookOfWorkProps {
 const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) => {
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
     const [searchTerm, setSearchTerm] = useState('');
-    const [sortBy, setSortBy] = useState<'name' | 'deadline' | 'status' | 'team'>('name');
+    const [sortBy, setSortBy] = useState<'name' | 'deadline' | 'status' | 'team' | 'created'>('created');
     const [editingProject, setEditingProject] = useState<{project: Project, teamId: string} | null>(null);
     const [isNewProject, setIsNewProject] = useState(false);
 
@@ -28,6 +28,7 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
         status: ProjectStatus.PLANNING,
         managerId: '',
         deadline: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString(), // Default Create Date
         members: [],
         tasks: [],
         isImportant: false,
@@ -52,6 +53,12 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
             if (sortBy === 'deadline') return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
             if (sortBy === 'status') return a.status.localeCompare(b.status);
             if (sortBy === 'team') return a.teamName.localeCompare(b.teamName);
+            if (sortBy === 'created') {
+                // Use createdAt if exists, fallback to ID if it looks like a timestamp, else 0
+                const tA = a.createdAt ? new Date(a.createdAt).getTime() : (parseInt(a.id) || 0);
+                const tB = b.createdAt ? new Date(b.createdAt).getTime() : (parseInt(b.id) || 0);
+                return tB - tA; // Newest first
+            }
             return 0;
         });
 
@@ -71,7 +78,7 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
         // Default to first team if available
         const defaultTeamId = teams[0]?.id || '';
         setEditingProject({
-            project: { ...emptyProject, id: Date.now().toString() },
+            project: { ...emptyProject, id: Date.now().toString(), createdAt: new Date().toISOString() },
             teamId: defaultTeamId
         });
     };
@@ -297,6 +304,18 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                                         className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                                     />
                                 </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Cost (Man Days)</label>
+                                    <input 
+                                        type="number"
+                                        min="0"
+                                        value={editingProject.project.costMD || ''}
+                                        onChange={e => setEditingProject({...editingProject, project: {...editingProject.project, costMD: parseFloat(e.target.value)}})}
+                                        className="w-full p-2 border rounded dark:bg-slate-800 dark:border-slate-700 dark:text-white"
+                                        placeholder="e.g. 50"
+                                    />
+                                </div>
                             </div>
 
                             {/* External Dependencies */}
@@ -465,6 +484,7 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                             onChange={(e) => setSortBy(e.target.value as any)}
                             className="pl-10 pr-8 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white cursor-pointer appearance-none"
                         >
+                            <option value="created">Created (Newest)</option>
                             <option value="name">Name (A-Z)</option>
                             <option value="deadline">Deadline (Earliest)</option>
                             <option value="status">Status</option>
@@ -566,9 +586,17 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                                             ) : null;
                                         })}
                                     </div>
-                                    <div className="text-xs text-slate-400 flex items-center">
-                                        <Calendar className="w-3 h-3 mr-1" />
-                                        {project.deadline}
+                                    <div className="flex flex-col items-end">
+                                        <div className="text-xs text-slate-400 flex items-center" title="Deadline">
+                                            <Calendar className="w-3 h-3 mr-1" />
+                                            {project.deadline}
+                                        </div>
+                                        {project.costMD && (
+                                            <div className="text-xs text-slate-400 flex items-center mt-0.5" title="Cost (MD)">
+                                                <Coins className="w-3 h-3 mr-1" />
+                                                {project.costMD} MD
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -585,7 +613,7 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                                 <th className="px-6 py-4">Contributors</th>
                                 <th className="px-6 py-4">Docs & Links</th>
                                 <th className="px-6 py-4">Dependencies</th>
-                                <th className="px-6 py-4">Deadline</th>
+                                <th className="px-6 py-4">Timeline & Cost</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -654,7 +682,10 @@ const BookOfWork: React.FC<BookOfWorkProps> = ({ teams, users, onUpdateTeam }) =
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                                        {project.deadline}
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium">Due: {project.deadline}</span>
+                                            {project.costMD && <span className="text-xs text-slate-400">Cost: {project.costMD} MD</span>}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}

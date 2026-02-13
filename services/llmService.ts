@@ -1,7 +1,5 @@
 
-
-
-import { Team, User, TaskStatus, LLMConfig, Meeting, WeeklyReport, ChatMessage, Note, Project } from "../types";
+import { Team, User, TaskStatus, LLMConfig, Meeting, WeeklyReport, ChatMessage, Note, Project, WorkingGroup, ActionItemStatus } from "../types";
 
 // --- DEFAULT PROMPTS ---
 
@@ -17,7 +15,7 @@ EXPECTED FORMAT (Markdown):
 2. **Key Attention Points**: Bullet list of blockers or risks (overdue dates). Use **Bold** with words like "Alert", "Critical", "Warning".
 3. **Action Plan**: 3 recommended actions for the manager.
 
-Be factual, direct, and constructive. Write in English.
+Be factual, direct, and constructive.
 `,
     meeting_summary: `
 You are an efficient executive secretary. Generate professional meeting minutes ready to be sent as an email based on the data.
@@ -33,7 +31,7 @@ Body:
 2. **Key Decisions**: Bullet points of agreed items. Use **Bold**.
 3. **Action Items**: Clean list of assigned actions.
 
-Tone: Professional, neutral, efficient. Write in English.
+Tone: Professional, neutral, efficient.
 `,
     weekly_email: `
 You are an executive assistant helping an employee write a professional weekly status update email to their management.
@@ -62,7 +60,6 @@ Hi Team / [Manager Name],
 
 Best regards,
 {{NAME}}
-Write in English.
 `,
     weekly_autofill: `
 You are a manager consolidating the weekly reports of your team.
@@ -88,8 +85,6 @@ Structure required:
   "orgaPoint": "Bullet list of HR/Orga points...",
   "otherSection": "Bullet list of other relevant info..."
 }
-
-Language: English.
 `,
     manager_synthesis: `
 You are a Senior Project Manager generating a high-level executive synthesis based on team reports.
@@ -110,8 +105,6 @@ CONSTRAINTS:
    - **Executive Overview**: 2-3 sentences.
    - **Project/Topic Updates**: Group updates by project name. Use bullet points.
    - **Team & HR**: Brief section for organizational points.
-
-Write in English.
 `,
     management_insight: `
 You are a high-end Management Consultant presenting to the Board of Directors.
@@ -134,7 +127,7 @@ For each team, use a sub-header like "**Team Name**" and provide:
 ### 🎯 Strategic Watchlist
 *   List top 3 items management must focus on immediately.
 
-Be insightful, professional, and use formatting (bold, lists) to make it easy to read. Write in English.
+Be insightful, professional, and use formatting (bold, lists) to make it easy to read.
 `,
     project_roadmap: `
 You are a Senior Technical Program Manager. Your goal is to produce a "Project Booklet / Roadmap" based strictly on the provided raw data.
@@ -164,10 +157,159 @@ MANDATORY STRUCTURE:
 *   If NO risks found in data, write: "✅ No specific alerts detected based on current data."
 
 Tone: Formal, "Consulting" style. 100% Accurate. No Hallucinations.
+`,
+    working_group_full: `
+You are a Project Director analyzing the full history of a Working Group.
+Your goal is to produce a comprehensive report summarizing the group's lifecycle, decisions, and remaining work.
+
+DATA:
+{{DATA}}
+
+MANDATORY STRUCTURE:
+
+### 📑 Executive Summary
+(Overview of the working group's purpose and progress from start to now).
+
+### ✅ Key Achievements & Closed Topics
+(List major topics discussed and actions marked as DONE. Highlight solved checklist items).
+
+### 🚧 Remaining Work (The "Rest to Do")
+(List actions that are NOT Done (Ongoing, To Start, Blocked). List checklist items NOT checked).
+*   **Actions**: ...
+*   **Checklist**: ...
+
+### ⚠️ Risks & Blockers
+(Highlight any item marked as BLOCKED or URGENT).
+
+Tone: Professional, synthesis-oriented.
+`,
+    working_group_session: `
+You are a Project Manager Assistant. Generate a summary strictly for the LAST session of this working group.
+
+DATA:
+{{DATA}}
+
+MANDATORY STRUCTURE:
+
+### 📅 Session Recap ({{DATE}})
+(Summarize the notes of this specific session).
+
+### ⚡ Action Plan (Next Steps)
+(List ONLY actions from this session that are NOT Done).
+*   [Action] (Owner / ETA)
+
+### 📋 Checklist Status
+(List checklist items relevant to this session that are NOT Done).
+
+### 🔔 Alerts
+(If any action is BLOCKED or checklist item is URGENT).
+
+Tone: Action-oriented.
+`,
+    what_to_do: `
+You are a highly efficient Productivity Coach and Project Manager.
+Analyze the provided workload data for the user.
+
+DATA:
+{{DATA}}
+
+TASK:
+Suggest a "Game Plan" for today to maximize impact.
+1. Identify immediate urgencies (Due today/overdue).
+2. Identify blockers to resolve (tasks blocked).
+3. Suggest a logical sequence of work (e.g., "Start with X to unblock team, then focus on Y").
+4. If data is missing (e.g. empty descriptions), suggest filling it.
+
+MANDATORY STRUCTURE:
+
+### 🚨 Immediate Priorities (Must Do)
+(Bullet points of overdue/today items. Use **Bold** for dates).
+
+### 🔓 Unblocking the Flow
+(Items marked as BLOCKED or dependencies).
+
+### 💡 Strategic Focus
+(Suggestion on which project/topic to advance today based on importance).
+
+### 🎲 Quick Wins
+(Small tasks to clear the backlog).
+
+Constraint: Be precise, concise, and do NOT invent tasks. Use only provided data.
+`,
+    checklist_extraction: `
+You are an expert project manager.
+Analyze the previous weekly report data below.
+
+DATA:
+{{DATA}}
+
+TASK:
+Extract actionable items that might need a follow-up in the current week.
+Focus on:
+1. "Main Issue" items (blocking points).
+2. "Incidents" (critical events).
+3. "Other" section if it contains specific requests or next steps.
+
+Exclude "Success" items (they are done).
+
+OUTPUT FORMAT:
+Return a JSON array of objects.
+[{ "originalText": "...", "category": "mainIssue" | "incident" | "other" }]
+
+If nothing actionable found, return [].
+JSON ONLY. No markdown.
 `
 };
 
+// --- Utility: Append Language Instruction ---
+const appendLanguage = (prompt: string, lang: 'en' | 'fr' = 'en') => {
+    const instruction = lang === 'fr' 
+        ? "\n\nCRITICAL INSTRUCTION: You MUST provide the output STRICTLY in FRENCH (Français)." 
+        : "\n\nCRITICAL INSTRUCTION: You MUST provide the output STRICTLY in ENGLISH.";
+    return prompt + instruction;
+};
+
 // --- Utility Functions for Data Preparation ---
+
+const prepareDailyContext = (teams: Team[], workingGroups: WorkingGroup[], user: User): string => {
+    let context = `USER: ${user.firstName} ${user.lastName}\nDATE: ${new Date().toISOString().split('T')[0]}\n\n`;
+
+    // 1. Projects & Tasks
+    context += "--- PROJECT TASKS ---\n";
+    teams.forEach(t => {
+        t.projects.filter(p => !p.isArchived).forEach(p => {
+            const myTasks = p.tasks.filter(task => task.assigneeId === user.id && task.status !== TaskStatus.DONE);
+            // Also include high priority unassigned tasks if user is manager
+            const unassignedHigh = p.tasks.filter(task => !task.assigneeId && task.isImportant && t.managerId === user.id && task.status !== TaskStatus.DONE);
+            
+            const relevantTasks = [...myTasks, ...unassignedHigh];
+
+            if (relevantTasks.length > 0) {
+                context += `Project: ${p.name} (Team: ${t.name})\n`;
+                relevantTasks.forEach(task => {
+                    context += `- [${task.status}] ${task.title} (Due: ${task.eta || 'None'}, Priority: ${task.priority || 'Medium'}). ${task.isImportant ? 'IMPORTANT.' : ''}\n`;
+                });
+            }
+        });
+    });
+
+    // 2. Working Groups Actions
+    context += "\n--- WORKING GROUP ACTIONS ---\n";
+    workingGroups.forEach(g => {
+        if(g.archived) return;
+        g.sessions.forEach(s => {
+            const myActions = s.actionItems.filter(a => a.ownerId === user.id && a.status !== ActionItemStatus.DONE);
+            if(myActions.length > 0) {
+                context += `Group: ${g.title}\n`;
+                myActions.forEach(a => {
+                    context += `- [${a.status}] ${a.description} (Due: ${a.dueDate || 'None'})\n`;
+                });
+            }
+        });
+    });
+
+    return context;
+};
 
 const prepareTeamData = (team: Team, manager: User | undefined): string => {
   const projectSummaries = team.projects.map(p => {
@@ -247,7 +389,6 @@ const prepareProjectDetailData = (project: Project, users: User[]): string => {
 }
 
 const prepareMeetingData = (meeting: Meeting, teamName: string, attendeesNames: string[], users: User[]): string => {
-  // Helper to resolve name (User object or Raw String)
   const resolveName = (idOrName: string) => {
       const u = users.find(user => user.id === idOrName);
       return u ? `${u.firstName} ${u.lastName}` : idOrName;
@@ -258,7 +399,8 @@ const prepareMeetingData = (meeting: Meeting, teamName: string, attendeesNames: 
      return `- ${ai.description} (Owner: ${ownerName || 'N/A'}, Due: ${ai.dueDate})`;
   }).join('\n');
 
-  // Re-map attendees to ensure external names are captured correctly if passed as IDs or raw strings
+  const decisionsText = meeting.decisions ? meeting.decisions.map(d => `- [DECISION] ${d.text}`).join('\n') : 'No formal decisions recorded.';
+
   const resolvedAttendees = meeting.attendees.map(resolveName);
 
   return `
@@ -269,6 +411,9 @@ const prepareMeetingData = (meeting: Meeting, teamName: string, attendeesNames: 
     
     Raw Notes (Minutes):
     ${meeting.minutes}
+
+    Key Decisions:
+    ${decisionsText}
     
     Action Items (Defined):
     ${actionItemsText}
@@ -314,6 +459,62 @@ const prepareManagementData = (teams: Team[], reports: WeeklyReport[], users: Us
     `;
 }
 
+const prepareWorkingGroupData = (group: WorkingGroup, teams: Team[], users: User[], onlyLastSession: boolean): string => {
+    // 1. Find Linked Project Info
+    let projectContext = "";
+    if (group.projectId) {
+        for (const t of teams) {
+            const p = t.projects.find(proj => proj.id === group.projectId);
+            if (p) {
+                projectContext = `
+                LINKED PROJECT CONTEXT:
+                Name: ${p.name}
+                Status: ${p.status}
+                Description: ${p.description}
+                Deadline: ${p.deadline}
+                Context Layers: ${(p.additionalDescriptions || []).join(' ')}
+                `;
+                break;
+            }
+        }
+    }
+
+    // 2. Prepare Session Data
+    const sessionsToProcess = onlyLastSession && group.sessions.length > 0 
+        ? [group.sessions[0]] // Just the first one (assuming sorted new->old)
+        : group.sessions;
+
+    const sessionsText = sessionsToProcess.map(s => {
+        const actions = s.actionItems.map(a => {
+            const owner = users.find(u => u.id === a.ownerId)?.firstName || 'Unassigned';
+            return `- [${a.status}] ${a.description} (Owner: ${owner}, ETA: ${a.eta || 'None'})`;
+        }).join('\n');
+
+        const checklist = s.checklist ? s.checklist.map(c => {
+            return `- [${c.done ? 'DONE' : 'TODO'}] ${c.text} ${c.isUrgent ? '(URGENT)' : ''} ${c.comment ? `(Note: ${c.comment})` : ''}`;
+        }).join('\n') : 'No checklist.';
+
+        return `
+        SESSION DATE: ${s.date}
+        NOTES: ${s.notes}
+        
+        ACTIONS:
+        ${actions}
+        
+        CHECKLIST:
+        ${checklist}
+        `;
+    }).join('\n----------------------------------\n');
+
+    return `
+    WORKING GROUP: ${group.title}
+    ${projectContext}
+
+    SESSIONS HISTORY:
+    ${sessionsText}
+    `;
+}
+
 // --- Helper to inject data into template ---
 const fillTemplate = (template: string, replacements: Record<string, string>) => {
     let result = template;
@@ -335,6 +536,7 @@ const buildChatContext = (history: ChatMessage[]): string => {
 };
 
 const callOllama = async (prompt: string, config: LLMConfig, images: string[] = []): Promise<string> => {
+    // 100% Local Call
     const url = `${config.baseUrl || 'http://localhost:11434'}/api/generate`;
     const body: any = {
         model: config.model || 'llama3',
@@ -361,7 +563,7 @@ const callOllama = async (prompt: string, config: LLMConfig, images: string[] = 
 };
 
 const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string> => {
-    // OpenAI-compatible endpoint format (common for LocalAI, LM Studio, etc.)
+    // OpenAI-compatible endpoint format (for LocalAI, LM Studio, etc.) - STRICTLY LOCAL
     const url = config.baseUrl || 'http://localhost:8000/v1/chat/completions';
     
     const headers: Record<string, string> = {
@@ -375,7 +577,7 @@ const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string>
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-            model: config.model || 'local-model', // Use the configured model
+            model: config.model || 'local-model', 
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.7
         })
@@ -386,7 +588,6 @@ const callLocalHttp = async (prompt: string, config: LLMConfig): Promise<string>
     }
 
     const data = await response.json();
-    // Handle OpenAI-like structure or flat structure
     return data.choices?.[0]?.message?.content || data.content || JSON.stringify(data);
 };
 
@@ -398,7 +599,7 @@ const callN8n = async (prompt: string, config: LLMConfig): Promise<string> => {
         'Content-Type': 'application/json'
     };
     if (config.apiKey) {
-        headers['Authorization'] = config.apiKey; // Usually Bearer or Basic, or just the key depending on n8n setup
+        headers['Authorization'] = config.apiKey; 
     }
 
     const response = await fetch(url, {
@@ -407,7 +608,6 @@ const callN8n = async (prompt: string, config: LLMConfig): Promise<string> => {
         body: JSON.stringify({
             prompt: prompt,
             model: config.model,
-            // Send timestamp to avoid caching issues sometimes
             timestamp: new Date().toISOString()
         })
     });
@@ -417,8 +617,6 @@ const callN8n = async (prompt: string, config: LLMConfig): Promise<string> => {
     }
 
     const data = await response.json();
-    
-    // N8N return flexibility: check for 'output', 'text', 'response' or return full JSON string
     if (typeof data === 'string') return data;
     return data.output || data.text || data.response || data.content || JSON.stringify(data);
 };
@@ -443,23 +641,22 @@ export const testConnection = async (config: LLMConfig): Promise<boolean> => {
     }
 };
 
-export const generateTeamReport = async (team: Team, manager: User | undefined, config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateTeamReport = async (team: Team, manager: User | undefined, config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
   const data = prepareTeamData(team, manager);
   const template = customPrompts?.['team_report'] || DEFAULT_PROMPTS.team_report;
   const prompt = fillTemplate(template, { DATA: data });
-  return runPrompt(prompt, config);
+  return runPrompt(appendLanguage(prompt, language), config);
 };
 
-export const generateProjectRoadmap = async (project: Project, users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateProjectRoadmap = async (project: Project, users: User[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const data = prepareProjectDetailData(project, users);
     const template = customPrompts?.['project_roadmap'] || DEFAULT_PROMPTS.project_roadmap;
     const prompt = fillTemplate(template, { DATA: data });
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 }
 
-export const generateMeetingSummary = async (meeting: Meeting, team: Team | undefined, users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateMeetingSummary = async (meeting: Meeting, team: Team | undefined, users: User[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const teamName = team ? team.name : 'General';
-    // Use the updated preparation logic that handles external names correctly
     const data = prepareMeetingData(meeting, teamName, meeting.attendees, users);
     
     const template = customPrompts?.['meeting_summary'] || DEFAULT_PROMPTS.meeting_summary;
@@ -468,10 +665,10 @@ export const generateMeetingSummary = async (meeting: Meeting, team: Team | unde
         TITLE: meeting.title 
     });
     
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 };
 
-export const generateWeeklyReportSummary = async (report: WeeklyReport, user: User | null, config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateWeeklyReportSummary = async (report: WeeklyReport, user: User | null, config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const data = prepareWeeklyReportData(report, user);
     const template = customPrompts?.['weekly_email'] || DEFAULT_PROMPTS.weekly_email;
     const prompt = fillTemplate(template, { 
@@ -479,16 +676,14 @@ export const generateWeeklyReportSummary = async (report: WeeklyReport, user: Us
         NAME: `${user?.firstName} ${user?.lastName}`,
         WEEK: report.weekOf
     });
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 }
 
-export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], teams: Team[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<Record<string, string>> => {
+export const generateConsolidatedReport = async (selectedReports: WeeklyReport[], users: User[], teams: Team[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<Record<string, string>> => {
     // 1. Prepare Data
     const reportsText = selectedReports.map(r => {
         const u = users.find(user => user.id === r.userId);
         
-        // Find Team context for this user
-        // Logic: Is user manager of a team? Or member of a project in a team?
         const userTeams = teams.filter(t => 
             t.managerId === u?.id || 
             t.projects.some(p => p.members.some(m => m.userId === u?.id))
@@ -511,11 +706,10 @@ export const generateConsolidatedReport = async (selectedReports: WeeklyReport[]
     const template = customPrompts?.['weekly_autofill'] || DEFAULT_PROMPTS.weekly_autofill;
     const prompt = fillTemplate(template, { DATA: reportsText });
 
-    const rawResponse = await runPrompt(prompt, config);
+    // Always append language instruction even for JSON, ensuring values are translated if needed
+    const rawResponse = await runPrompt(appendLanguage(prompt, language), config);
     
-    // Attempt parsing
     try {
-        // Cleaning markdown code blocks if present
         const cleanJson = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(cleanJson);
         return parsed;
@@ -526,12 +720,12 @@ export const generateConsolidatedReport = async (selectedReports: WeeklyReport[]
             mainIssue: "",
             incident: "",
             orgaPoint: "",
-            otherSection: rawResponse // Fallback: put everything in 'other' if parse fails
+            otherSection: rawResponse 
         };
     }
 }
 
-export const generateManagerSynthesis = async (reportData: WeeklyReport, config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateManagerSynthesis = async (reportData: WeeklyReport, config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const data = `
     SUCCESSES:
     ${reportData.mainSuccess}
@@ -552,18 +746,32 @@ export const generateManagerSynthesis = async (reportData: WeeklyReport, config:
     const template = customPrompts?.['manager_synthesis'] || DEFAULT_PROMPTS.manager_synthesis;
     const prompt = fillTemplate(template, { DATA: data });
 
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 };
 
-export const generateManagementInsight = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>): Promise<string> => {
+export const generateFollowUpChecklist = async (previousReport: WeeklyReport, config: LLMConfig): Promise<any[]> => {
+    const data = prepareWeeklyReportData(previousReport, null);
+    // Checklist extraction usually follows source language, but can be forced EN for system usage
+    const prompt = fillTemplate(DEFAULT_PROMPTS.checklist_extraction, { DATA: data });
+    
+    const rawResponse = await runPrompt(prompt, config);
+    try {
+        const cleanJson = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanJson);
+    } catch (e) {
+        console.error("JSON parse error in follow up extraction", e);
+        return [];
+    }
+}
+
+export const generateManagementInsight = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const data = prepareManagementData(teams, reports, users);
     const template = customPrompts?.['management_insight'] || DEFAULT_PROMPTS.management_insight;
     const prompt = fillTemplate(template, { DATA: data });
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 }
 
-export const generateRiskAssessment = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig): Promise<string> => {
-    // 1. Collect Project Context
+export const generateRiskAssessment = async (teams: Team[], reports: WeeklyReport[], users: User[], config: LLMConfig, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const projectContext = teams.flatMap(t => t.projects.map(p => {
         const context = (p.additionalDescriptions || []).join(' ');
         const blockedTasks = p.tasks.filter(task => task.status === TaskStatus.BLOCKED).map(t => t.title).join(', ');
@@ -574,7 +782,6 @@ export const generateRiskAssessment = async (teams: Team[], reports: WeeklyRepor
         `;
     })).join('\n');
 
-    // 2. Collect Last 3 Reports per User
     const reportsByUser: {[key: string]: WeeklyReport[]} = {};
     reports.forEach(r => {
         if (!reportsByUser[r.userId]) reportsByUser[r.userId] = [];
@@ -615,10 +822,33 @@ export const generateRiskAssessment = async (teams: Team[], reports: WeeklyRepor
     - **CRITICAL**: Project X is overdue and has blocked tasks since 3 weeks.
     - **HIGH RISK**: User Y reports Red status for 3 consecutive weeks. Burnout risk.
     `;
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 }
 
-export const generateNoteSummary = async (note: Note, includeImages: boolean, config: LLMConfig): Promise<string> => {
+export const generateWorkingGroupFullReport = async (group: WorkingGroup, teams: Team[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
+    const data = prepareWorkingGroupData(group, teams, users, false);
+    const template = customPrompts?.['working_group_full'] || DEFAULT_PROMPTS.working_group_full;
+    const prompt = fillTemplate(template, { DATA: data });
+    return runPrompt(appendLanguage(prompt, language), config);
+};
+
+export const generateWorkingGroupSessionReport = async (group: WorkingGroup, teams: Team[], users: User[], config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
+    const data = prepareWorkingGroupData(group, teams, users, true);
+    // Find latest date for title
+    const latestDate = group.sessions.length > 0 ? group.sessions[0].date : 'Unknown Date';
+    const template = customPrompts?.['working_group_session'] || DEFAULT_PROMPTS.working_group_session;
+    const prompt = fillTemplate(template, { DATA: data, DATE: latestDate });
+    return runPrompt(appendLanguage(prompt, language), config);
+};
+
+export const generateDailyPlan = async (teams: Team[], workingGroups: WorkingGroup[], user: User, config: LLMConfig, customPrompts?: Record<string, string>, language: 'en' | 'fr' = 'en'): Promise<string> => {
+    const data = prepareDailyContext(teams, workingGroups, user);
+    const template = customPrompts?.['what_to_do'] || DEFAULT_PROMPTS.what_to_do;
+    const prompt = fillTemplate(template, { DATA: data });
+    return runPrompt(appendLanguage(prompt, language), config);
+}
+
+export const generateNoteSummary = async (note: Note, includeImages: boolean, config: LLMConfig, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const textContent = note.blocks
         .filter(b => b.type === 'text')
         .map(b => b.content || '')
@@ -651,16 +881,14 @@ export const generateNoteSummary = async (note: Note, includeImages: boolean, co
     Use **Bold** with "Alert", "Important", "Success" to highlight key facts.
     `;
 
-    return runPrompt(prompt, config, images);
+    return runPrompt(appendLanguage(prompt, language), config, images);
 }
 
-export const sendChatMessage = async (history: ChatMessage[], newPrompt: string, config: LLMConfig, images: string[] = []): Promise<string> => {
+export const sendChatMessage = async (history: ChatMessage[], newPrompt: string, config: LLMConfig, images: string[] = [], language: 'en' | 'fr' = 'en'): Promise<string> => {
     const context = buildChatContext(history);
     
     const fullPrompt = `
     You are DOINg Assistant, an AI integrated into a project management tool.
-    
-    CRITICAL: You MUST answer strictly in ENGLISH.
     
     Here is the recent conversation history:
     ${context}
@@ -668,14 +896,14 @@ export const sendChatMessage = async (history: ChatMessage[], newPrompt: string,
     New User Request:
     ${newPrompt}
     
-    Answer in a helpful, professional, and concise manner in ENGLISH.
+    Answer in a helpful, professional, and concise manner.
     Use **Bold** for emphasis. If mentioning risks, use words like "Warning" or "Alert" inside bold tags.
     `;
     
-    return runPrompt(fullPrompt, config, images);
+    return runPrompt(appendLanguage(fullPrompt, language), config, images);
 };
 
-export const generateDocumentSynthesis = async (contentOrDescription: string, config: LLMConfig): Promise<string> => {
+export const generateDocumentSynthesis = async (contentOrDescription: string, config: LLMConfig, language: 'en' | 'fr' = 'en'): Promise<string> => {
     const prompt = `
     Task: Generate a professional summary of the provided document or content.
     
@@ -687,10 +915,10 @@ export const generateDocumentSynthesis = async (contentOrDescription: string, co
     • Key Takeaways: (Key info, numbers, decisions). Use **Bold** for numbers/wins.
     • Attention Points: (Risks, required actions). Use **Bold** with "Alert" or "Warning" for risks.
     
-    Be creative but precise. Format response in clean Markdown. Answer in ENGLISH.
+    Be creative but precise. Format response in clean Markdown.
     `;
     
-    return runPrompt(prompt, config);
+    return runPrompt(appendLanguage(prompt, language), config);
 }
 
 const runPrompt = async (prompt: string, config: LLMConfig, images: string[] = []): Promise<string> => {
@@ -703,7 +931,7 @@ const runPrompt = async (prompt: string, config: LLMConfig, images: string[] = [
           case 'n8n':
             return await callN8n(prompt, config);
           default:
-            return `Provider ${config.provider} not supported.`;
+            return `Provider ${config.provider} not supported. Use Local AI only.`;
         }
       } catch (error: any) {
         return `Generation Error (${config.provider}): ${error.message}`;

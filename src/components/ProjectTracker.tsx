@@ -465,9 +465,10 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   // Context Descriptions Handler
   const updateAdditionalDescription = (index: number, value: string) => {
       if (!editingProject) return;
-      const newDescriptions = [...(editingProject.project.additionalDescriptions || ['', '', ''])];
+      const newDescriptions = [...(editingProject.additionalDescriptions || ['', '', ''])];
       newDescriptions[index] = value;
-      setEditingProject({ ...editingProject, project: { ...editingProject.project, additionalDescriptions: newDescriptions } });
+      // Fixed: Access editingProject.additionalDescriptions directly as editingProject is the Project object
+      setEditingProject({ ...editingProject, additionalDescriptions: newDescriptions });
   };
 
   const calculateWeightedProgress = (tasks: Task[]) => {
@@ -719,7 +720,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       {/* Task Edit Modal */}
       {editingTask && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-              {/* ... (Task Modal Content remains unchanged) ... */}
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-4">
                       <h3 className="text-lg font-bold dark:text-white">Edit Task</h3>
@@ -968,6 +968,8 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           </div>
       )}
 
+      {/* ... (Team Header, AI Report, Bulk Selection components remain same) ... */}
+      
       {/* Team Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -995,23 +997,6 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                    <p className="text-sm font-medium text-slate-900 dark:text-slate-200">{teamManager ? `${teamManager.firstName} ${teamManager.lastName}` : 'Unassigned'}</p>
                </div>
            </div>
-        </div>
-
-        {/* View Toggle (Live vs Archive) */}
-        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-            <button 
-                onClick={() => setShowArchived(false)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${!showArchived ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-                Live Projects
-            </button>
-            <button 
-                onClick={() => setShowArchived(true)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${showArchived ? 'bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-                <Archive className="w-3 h-3" />
-                Archive
-            </button>
         </div>
 
         <div className="flex gap-2">

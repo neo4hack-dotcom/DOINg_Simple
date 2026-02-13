@@ -17,10 +17,7 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
 
   teams.forEach(t => {
     t.projects.forEach(p => {
-      // Exclude archived projects from Global KPIs
-      if (p.isArchived) return;
-
-      p.projects?.forEach((sub: any) => {}); // Handle potential recursive if needed, but assuming flat structure here based on types
+      // p.projects?.forEach((sub: any) => {}); // Removed as Project type does not have sub-projects property in this version
       p.tasks.forEach(task => {
         totalTasks++;
         if (task.status === TaskStatus.DONE) totalClosed++;
@@ -103,7 +100,7 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
             value={`${completionRate}%`} 
             icon={CheckCircle2}
             colorClass="text-emerald-500"
-            subtext="Global completion (Live)"
+            subtext="Global completion"
         />
         <StatCard 
             title="Active Work" 
@@ -124,7 +121,7 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
             value={totalTasks} 
             icon={Clock}
             colorClass="text-slate-400"
-            subtext="Live tasks recorded"
+            subtext="Total tasks recorded"
         />
       </div>
 
@@ -132,12 +129,11 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
         
         {/* Native Stacked Bar Chart for Team Workload */}
         <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 lg:col-span-2">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">Team Workload Distribution (Active Projects)</h3>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">Team Workload Distribution</h3>
             <div className="space-y-6">
                 {teams.map(team => {
                     let tDone = 0, tProg = 0, tBlock = 0, tTodo = 0;
                     team.projects.forEach(p => {
-                        if (p.isArchived) return; // Skip archived
                         p.tasks.forEach(t => {
                             if(t.status === TaskStatus.DONE) tDone++;
                             else if(t.status === TaskStatus.ONGOING) tProg++;

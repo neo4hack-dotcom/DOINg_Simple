@@ -84,6 +84,11 @@ export interface ChecklistItem {
   comment?: string; // New: Per-item comment
 }
 
+export interface Decision {
+  id: string;
+  text: string;
+}
+
 // Nouvelle interface pour les dépendances externes avec statut RAG
 export interface ExternalDependency {
   id: string;
@@ -105,7 +110,9 @@ export interface Task {
   weight: number; 
   isImportant: boolean; 
   checklist?: ChecklistItem[]; 
-  order?: number; 
+  order?: number;
+  costMD?: number; // New: Cost in Man Days
+  docUrls?: string[]; // New: Links to documents (SharePoint, etc.)
 }
 
 export interface ProjectMember {
@@ -122,13 +129,16 @@ export interface Project {
   owner?: string; // New: Product Owner / Business Owner (User name or external)
   architect?: string; // New: Technical Architect (User name or external)
   deadline: string; 
+  createdAt?: string; // New: Creation Date ISO String
   members: ProjectMember[];
   tasks: Task[];
   isImportant: boolean; 
+  isArchived?: boolean; // New: Flag for archived projects (excluded from KPIs)
   docUrls?: string[]; 
   dependencies?: string[]; // Internal Project IDs
   externalDependencies?: ExternalDependency[]; // New: External systems/people
   additionalDescriptions?: string[]; // New: Context fields for AI (3 x 2000 chars)
+  costMD?: number; // New: Project Budget/Cost in Man Days
 }
 
 export interface Team {
@@ -146,6 +156,7 @@ export interface Meeting {
   title: string;
   attendees: string[];
   minutes: string;
+  decisions?: Decision[]; // New: Key Decisions
   actionItems: ActionItem[];
 }
 
@@ -155,7 +166,9 @@ export interface ActionItem {
   ownerId: string;
   dueDate: string;
   status: ActionItemStatus;
-  eta?: string; // Added ETA
+  eta?: string;
+  category?: string; // New: Family/Category of the action
+  priority?: TaskPriority; // New: Criticality
 }
 
 export type HealthStatus = 'Green' | 'Amber' | 'Red'; 
@@ -167,6 +180,7 @@ export interface WeeklyReport {
   mainSuccess: string;
   mainIssue: string;
   incident: string;
+  newThisWeek?: string; // New: New topics started this week
   orgaPoint: string;
   otherSection?: string; 
   teamHealth?: HealthStatus; 
@@ -216,6 +230,7 @@ export interface WorkingGroupSession {
   id: string;
   date: string;
   notes: string;
+  decisions?: Decision[]; // New: Key Decisions
   actionItems: ActionItem[];
   checklist?: WorkingGroupChecklistItem[]; // New Checklist feature
 }
@@ -229,6 +244,23 @@ export interface WorkingGroup {
   archived: boolean;
 }
 
+// --- NOTIFICATIONS ---
+export interface AppNotification {
+    id: string;
+    type: 'PROJECT_CREATED' | 'TASK_ADDED' | 'TASK_CLOSED' | 'REPORT_SUBMITTED';
+    title: string;
+    subtitle: string;
+    timestamp: string;
+    read: boolean;
+    data?: {
+        projectId?: string;
+        taskId?: string;
+        teamId?: string;
+        actorName?: string;
+        reportId?: string;
+    };
+}
+
 export interface AppState {
   users: User[];
   teams: Team[];
@@ -236,6 +268,7 @@ export interface AppState {
   weeklyReports: WeeklyReport[];
   notes: Note[];
   workingGroups: WorkingGroup[]; // New module
+  notifications?: AppNotification[]; // New notifications
   currentUser: User | null;
   theme: 'light' | 'dark';
   llmConfig: LLMConfig;

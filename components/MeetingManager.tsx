@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { Meeting, ActionItem, ActionItemStatus, Team, User, LLMConfig } from '../types';
+import { Meeting, ActionItem, ActionItemStatus, Team, User, LLMConfig, Decision } from '../types';
 import { generateMeetingSummary } from '../services/llmService';
+import { generateId } from '../services/storage';
 import FormattedText from './FormattedText';
-import { Plus, Calendar, User as UserIcon, CheckSquare, Trash2, Save, FileText, BookOpen, Mail, X, Copy, Loader2, Folder, Briefcase, Download, UserPlus } from 'lucide-react';
+import { Plus, Calendar, User as UserIcon, CheckSquare, Trash2, Save, FileText, BookOpen, Mail, X, Copy, Loader2, Folder, Briefcase, Download, UserPlus, Gavel } from 'lucide-react';
 
 interface MeetingManagerProps {
   meetings: Meeting[];
@@ -21,9 +22,13 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [generatedSummary, setGeneratedSummary] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiLang, setAiLang] = useState<'en'|'fr'>('en');
 
   // State for free text attendee
   const [newAttendeeName, setNewAttendeeName] = useState('');
+
+  // State for new Decision
+  const [newDecisionText, setNewDecisionText] = useState('');
 
   const initialMeetingState: Meeting = {
     id: '',
@@ -33,7 +38,8 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
     projectId: '', // Optional Project ID
     attendees: [],
     minutes: '',
-    actionItems: []
+    actionItems: [],
+    decisions: []
   };
 
   const [editMeeting, setEditMeeting] = useState<Meeting>(initialMeetingState);
@@ -78,12 +84,13 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
       setGeneratedSummary('');
       
       const team = teams.find(t => t.id === editMeeting.teamId);
-      const summary = await generateMeetingSummary(editMeeting, team, users, llmConfig);
+      const summary = await generateMeetingSummary(editMeeting, team, users, llmConfig, undefined, aiLang);
       
       setGeneratedSummary(summary);
       setIsGenerating(false);
   };
 
+  // ... (Clipboard & Doc functions) ...
   const cleanTextForClipboard = (text: string) => {
       return text
           .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
@@ -107,6 +114,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
       element.click();
   };
 
+  // ... (CRUD Logic) ...
   const addActionItem = () => {
     const newItem: ActionItem = {
         id: Date.now().toString(),
@@ -131,6 +139,26 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
     const newItems = editMeeting.actionItems.filter((_, i) => i !== index);
     setEditMeeting({ ...editMeeting, actionItems: newItems });
   };
+
+  const addDecision = () => {
+      if(!newDecisionText.trim()) return;
+      const newDecision: Decision = {
+          id: generateId(),
+          text: newDecisionText
+      };
+      setEditMeeting({
+          ...editMeeting,
+          decisions: [...(editMeeting.decisions || []), newDecision]
+      });
+      setNewDecisionText('');
+  }
+
+  const removeDecision = (id: string) => {
+      setEditMeeting({
+          ...editMeeting,
+          decisions: (editMeeting.decisions || []).filter(d => d.id !== id)
+      });
+  }
 
   const toggleAttendee = (userId: string) => {
       const current = editMeeting.attendees;
@@ -228,6 +256,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
 
       {/* List - "Stack of Folders" Style */}
       <div className="w-full lg:w-1/3 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+        {/* ... (Existing list rendering) ... */}
         <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800">
             <h3 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2"><Folder className="w-5 h-5"/> Archives</h3>
             <button 
@@ -294,7 +323,13 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                                 placeholder="ex: Weekly Sync"
                             />
                          </div>
-                         <div className="flex gap-2">
+                         <div className="flex gap-2 items-center">
+                             {/* Lang Toggle */}
+                             <div className="flex bg-slate-200 dark:bg-slate-700 rounded-lg p-1 mr-2">
+                                <button onClick={() => setAiLang('en')} className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'en' ? 'bg-white dark:bg-slate-600 text-indigo-600' : 'text-slate-500'}`}>EN</button>
+                                <button onClick={() => setAiLang('fr')} className={`px-2 py-1 text-xs font-bold rounded ${aiLang === 'fr' ? 'bg-white dark:bg-slate-600 text-indigo-600' : 'text-slate-500'}`}>FR</button>
+                             </div>
+
                              <button 
                                 onClick={handleGenerateSummary}
                                 className="flex items-center bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-4 py-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 shadow-sm transition-colors text-sm font-medium border border-indigo-200 dark:border-indigo-800"
@@ -310,6 +345,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* ... (Date, Team, Project Selectors) ... */}
                         <div>
                              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Details</label>
                              <div className="space-y-3">
@@ -340,6 +376,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                                 </div>
                              </div>
                         </div>
+                        {/* ... (Attendees) ... */}
                         <div>
                              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Attendees</label>
                              <div className="flex flex-col gap-2">
@@ -408,6 +445,39 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                          />
                     </div>
 
+                    {/* Key Decisions Section */}
+                    <div>
+                        <h4 className="flex items-center text-lg font-bold text-slate-800 dark:text-slate-100 mb-3">
+                             <Gavel className="w-5 h-5 mr-2 text-amber-500" />
+                             Key Decisions
+                        </h4>
+                        <div className="space-y-3">
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={newDecisionText}
+                                    onChange={e => setNewDecisionText(e.target.value)}
+                                    className="flex-1 p-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm bg-white dark:bg-slate-800 dark:text-white"
+                                    placeholder="Enter a new decision..."
+                                    onKeyDown={e => e.key === 'Enter' && addDecision()}
+                                />
+                                <button onClick={addDecision} className="px-3 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg text-sm font-bold">Add</button>
+                            </div>
+                            <ul className="space-y-2">
+                                {(editMeeting.decisions || []).map(decision => (
+                                    <li key={decision.id} className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/10 p-2 rounded-lg border border-amber-100 dark:border-amber-900/30 text-sm text-slate-800 dark:text-slate-200">
+                                        <Gavel className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                                        <span className="flex-1">{decision.text}</span>
+                                        <button onClick={() => removeDecision(decision.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                                    </li>
+                                ))}
+                                {(editMeeting.decisions || []).length === 0 && (
+                                    <li className="text-sm text-slate-400 italic">No formal decisions recorded.</li>
+                                )}
+                            </ul>
+                        </div>
+                    </div>
+
                     {/* Action Items Section */}
                     <div>
                         <div className="flex justify-between items-center mb-4">
@@ -421,6 +491,7 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                             </button>
                         </div>
                         
+                        {/* ... (Action Table) ... */}
                         <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
                             <table className="w-full text-sm text-left">
                                 <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
@@ -434,7 +505,6 @@ const MeetingManager: React.FC<MeetingManagerProps> = ({ meetings, teams, users,
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-900">
                                     {editMeeting.actionItems.map((item, idx) => {
-                                        // Check if ownerId matches a real user, otherwise it is free text
                                         const isKnownUser = users.some(u => u.id === item.ownerId);
                                         const isFreeText = item.ownerId && !isKnownUser;
 

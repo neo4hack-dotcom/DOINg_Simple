@@ -17,7 +17,9 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
 
   teams.forEach(t => {
     t.projects.forEach(p => {
-      p.projects?.forEach((sub: any) => {}); // Handle potential recursive if needed, but assuming flat structure here based on types
+      // Ignore archived projects for KPIs
+      if (p.isArchived) return;
+
       p.tasks.forEach(task => {
         totalTasks++;
         if (task.status === TaskStatus.DONE) totalClosed++;
@@ -133,7 +135,12 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
             <div className="space-y-6">
                 {teams.map(team => {
                     let tDone = 0, tProg = 0, tBlock = 0, tTodo = 0;
-                    team.projects.forEach(p => {
+                    
+                    // Filter archived projects before aggregation
+                    const activeProjects = team.projects.filter(p => !p.isArchived);
+                    
+                    // Count tasks
+                    activeProjects.forEach(p => {
                         p.tasks.forEach(t => {
                             if(t.status === TaskStatus.DONE) tDone++;
                             else if(t.status === TaskStatus.ONGOING) tProg++;
@@ -142,20 +149,27 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
                         });
                     });
                     const tTotal = tDone + tProg + tBlock + tTodo;
-                    if (tTotal === 0) return null;
 
                     return (
                         <div key={team.id}>
                             <div className="flex justify-between text-sm mb-2">
                                 <span className="font-semibold text-slate-700 dark:text-slate-200">{team.name}</span>
-                                <span className="text-slate-500">{tTotal} tasks</span>
+                                <span className="text-slate-500">
+                                    {tTotal} tasks {activeProjects.length > 0 && `(${activeProjects.length} projects)`}
+                                </span>
                             </div>
-                            <div className="h-4 w-full bg-slate-100 dark:bg-slate-700 rounded-full flex overflow-hidden">
-                                {tDone > 0 && <div style={{width: `${(tDone/tTotal)*100}%`}} className="bg-emerald-500 h-full" title={`Done: ${tDone}`}></div>}
-                                {tProg > 0 && <div style={{width: `${(tProg/tTotal)*100}%`}} className="bg-blue-500 h-full" title={`In Progress: ${tProg}`}></div>}
-                                {tBlock > 0 && <div style={{width: `${(tBlock/tTotal)*100}%`}} className="bg-red-500 h-full" title={`Blocked: ${tBlock}`}></div>}
-                                {tTodo > 0 && <div style={{width: `${(tTodo/tTotal)*100}%`}} className="bg-slate-300 dark:bg-slate-600 h-full" title={`Todo: ${tTodo}`}></div>}
-                            </div>
+                            {tTotal > 0 ? (
+                                <div className="h-4 w-full bg-slate-100 dark:bg-slate-700 rounded-full flex overflow-hidden">
+                                    {tDone > 0 && <div style={{width: `${(tDone/tTotal)*100}%`}} className="bg-emerald-500 h-full" title={`Done: ${tDone}`}></div>}
+                                    {tProg > 0 && <div style={{width: `${(tProg/tTotal)*100}%`}} className="bg-blue-500 h-full" title={`In Progress: ${tProg}`}></div>}
+                                    {tBlock > 0 && <div style={{width: `${(tBlock/tTotal)*100}%`}} className="bg-red-500 h-full" title={`Blocked: ${tBlock}`}></div>}
+                                    {tTodo > 0 && <div style={{width: `${(tTodo/tTotal)*100}%`}} className="bg-slate-300 dark:bg-slate-600 h-full" title={`Todo: ${tTodo}`}></div>}
+                                </div>
+                            ) : (
+                                <div className="h-4 w-full bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center">
+                                    <span className="text-[9px] text-slate-400 font-medium">No active tasks</span>
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -177,7 +191,7 @@ const KPIDashboard: React.FC<KPIDashboardProps> = ({ teams }) => {
             
             {totalTasks > 0 ? <DonutChart /> : (
                 <div className="h-64 w-full flex items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-full">
-                    No Data
+                    No Data (Active Projects)
                 </div>
             )}
 

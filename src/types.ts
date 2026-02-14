@@ -106,11 +106,24 @@ export interface Task {
   isImportant: boolean; 
   checklist?: ChecklistItem[]; 
   order?: number; 
+  costMD?: number; // New: Cost in Man Days
+  docUrls?: string[]; // New: Links to documents (SharePoint, etc.)
+  auditLog?: AuditLogEntry[]; // New: Traceability log on task level if needed
 }
 
 export interface ProjectMember {
   userId: string;
   role: ProjectRole;
+}
+
+// --- AUDIT TRAIL TYPES ---
+export interface AuditLogEntry {
+    id: string;
+    timestamp: string; // ISO Date
+    userName: string;
+    action: string; // e.g. "Updated Status", "Task Created"
+    target: string; // e.g. "Project", "Task: Login Fix"
+    details?: string; // e.g. "To Do -> Done"
 }
 
 export interface Project {
@@ -122,6 +135,7 @@ export interface Project {
   owner?: string; // New: Product Owner / Business Owner (User name or external)
   architect?: string; // New: Technical Architect (User name or external)
   deadline: string; 
+  createdAt?: string; 
   members: ProjectMember[];
   tasks: Task[];
   isImportant: boolean; 
@@ -130,6 +144,8 @@ export interface Project {
   dependencies?: string[]; // Internal Project IDs
   externalDependencies?: ExternalDependency[]; // New: External systems/people
   additionalDescriptions?: string[]; // New: Context fields for AI (3 x 2000 chars)
+  costMD?: number;
+  auditLog?: AuditLogEntry[]; // New: Traceability log
 }
 
 export interface Team {
@@ -147,7 +163,13 @@ export interface Meeting {
   title: string;
   attendees: string[];
   minutes: string;
+  decisions?: Decision[];
   actionItems: ActionItem[];
+}
+
+export interface Decision {
+  id: string;
+  text: string;
 }
 
 export interface ActionItem {
@@ -170,6 +192,7 @@ export interface WeeklyReport {
   mainSuccess: string;
   mainIssue: string;
   incident: string;
+  newThisWeek?: string; 
   orgaPoint: string;
   otherSection?: string; 
   teamHealth?: HealthStatus; 
@@ -219,6 +242,7 @@ export interface WorkingGroupSession {
   id: string;
   date: string;
   notes: string;
+  decisions?: Decision[];
   actionItems: ActionItem[];
   checklist?: WorkingGroupChecklistItem[]; // New Checklist feature
 }
@@ -232,6 +256,23 @@ export interface WorkingGroup {
   archived: boolean;
 }
 
+// --- NOTIFICATIONS ---
+export interface AppNotification {
+    id: string;
+    type: 'PROJECT_CREATED' | 'TASK_ADDED' | 'TASK_CLOSED' | 'REPORT_SUBMITTED';
+    title: string;
+    subtitle: string;
+    timestamp: string;
+    read: boolean;
+    data?: {
+        projectId?: string;
+        taskId?: string;
+        teamId?: string;
+        actorName?: string;
+        reportId?: string;
+    };
+}
+
 export interface AppState {
   users: User[];
   teams: Team[];
@@ -239,6 +280,7 @@ export interface AppState {
   weeklyReports: WeeklyReport[];
   notes: Note[];
   workingGroups: WorkingGroup[]; // New module
+  notifications?: AppNotification[]; // New notifications
   currentUser: User | null;
   theme: 'light' | 'dark';
   llmConfig: LLMConfig;

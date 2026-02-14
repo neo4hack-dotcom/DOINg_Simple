@@ -84,11 +84,6 @@ export interface ChecklistItem {
   comment?: string; // New: Per-item comment
 }
 
-export interface Decision {
-  id: string;
-  text: string;
-}
-
 // Nouvelle interface pour les dépendances externes avec statut RAG
 export interface ExternalDependency {
   id: string;
@@ -110,7 +105,7 @@ export interface Task {
   weight: number; 
   isImportant: boolean; 
   checklist?: ChecklistItem[]; 
-  order?: number;
+  order?: number; 
   costMD?: number; // New: Cost in Man Days
   docUrls?: string[]; // New: Links to documents (SharePoint, etc.)
 }
@@ -118,6 +113,16 @@ export interface Task {
 export interface ProjectMember {
   userId: string;
   role: ProjectRole;
+}
+
+// --- AUDIT TRAIL TYPES ---
+export interface AuditLogEntry {
+    id: string;
+    timestamp: string; // ISO Date
+    userName: string;
+    action: string; // e.g. "Updated Status", "Task Created"
+    target: string; // e.g. "Project", "Task: Login Fix"
+    details?: string; // e.g. "To Do -> Done"
 }
 
 export interface Project {
@@ -129,7 +134,7 @@ export interface Project {
   owner?: string; // New: Product Owner / Business Owner (User name or external)
   architect?: string; // New: Technical Architect (User name or external)
   deadline: string; 
-  createdAt?: string; // New: Creation Date ISO String
+  createdAt?: string; 
   members: ProjectMember[];
   tasks: Task[];
   isImportant: boolean; 
@@ -138,7 +143,8 @@ export interface Project {
   dependencies?: string[]; // Internal Project IDs
   externalDependencies?: ExternalDependency[]; // New: External systems/people
   additionalDescriptions?: string[]; // New: Context fields for AI (3 x 2000 chars)
-  costMD?: number; // New: Project Budget/Cost in Man Days
+  costMD?: number;
+  auditLog?: AuditLogEntry[]; // New: Traceability log
 }
 
 export interface Team {
@@ -156,8 +162,13 @@ export interface Meeting {
   title: string;
   attendees: string[];
   minutes: string;
-  decisions?: Decision[]; // New: Key Decisions
+  decisions?: Decision[];
   actionItems: ActionItem[];
+}
+
+export interface Decision {
+  id: string;
+  text: string;
 }
 
 export interface ActionItem {
@@ -180,7 +191,7 @@ export interface WeeklyReport {
   mainSuccess: string;
   mainIssue: string;
   incident: string;
-  newThisWeek?: string; // New: New topics started this week
+  newThisWeek?: string; 
   orgaPoint: string;
   otherSection?: string; 
   teamHealth?: HealthStatus; 
@@ -230,7 +241,7 @@ export interface WorkingGroupSession {
   id: string;
   date: string;
   notes: string;
-  decisions?: Decision[]; // New: Key Decisions
+  decisions?: Decision[];
   actionItems: ActionItem[];
   checklist?: WorkingGroupChecklistItem[]; // New Checklist feature
 }

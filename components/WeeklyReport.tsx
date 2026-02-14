@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, WeeklyReport as WeeklyReportType, LLMConfig, HealthStatus, Team, UserRole } from '../types';
 import { generateWeeklyReportSummary, generateConsolidatedReport, generateManagerSynthesis, generateFollowUpChecklist } from '../services/llmService';
 import FormattedText from './FormattedText';
-import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive, FileText, Sparkles, RefreshCcw, Flag } from 'lucide-react';
+import { Save, Calendar, CheckCircle2, AlertOctagon, AlertTriangle, Users, History, Bot, Loader2, Copy, X, Pencil, Plus, Mail, MessageSquare, Activity, MoreHorizontal, Download, Wand2, Archive, FileText, Sparkles, RefreshCcw, Flag, Printer } from 'lucide-react';
 
 interface WeeklyReportProps {
   reports: WeeklyReportType[];
@@ -286,6 +286,82 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
       }
   };
 
+  const handlePrintReport = () => {
+      window.print();
+  }
+
+  // --- PRINTABLE VIEW ---
+  const renderPrintView = () => {
+      const author = users.find(u => u.id === currentReport.userId);
+      return (
+          <div id="printable-report" className="printable-area hidden print:block font-serif text-black p-8 bg-white">
+              <div className="border-b-2 border-black pb-4 mb-6">
+                  <h1 className="text-3xl font-bold uppercase tracking-wider mb-1">Weekly Status Report</h1>
+                  <div className="flex justify-between items-end">
+                      <div>
+                          <p className="text-lg"><strong>{author?.firstName} {author?.lastName}</strong></p>
+                          <p className="text-sm">{author?.functionTitle}</p>
+                      </div>
+                      <div className="text-right">
+                          <p className="text-lg font-bold">{getWeekLabel(currentReport.weekOf)}</p>
+                          <p className="text-xs">Generated: {new Date().toLocaleDateString()}</p>
+                      </div>
+                  </div>
+              </div>
+
+              {/* RAG */}
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className={`p-4 border border-black ${currentReport.teamHealth === 'Red' ? 'bg-red-100' : currentReport.teamHealth === 'Amber' ? 'bg-amber-100' : 'bg-green-100'}`}>
+                      <h3 className="font-bold text-sm uppercase">Team Health</h3>
+                      <p className="text-xl font-bold">{currentReport.teamHealth}</p>
+                  </div>
+                  <div className={`p-4 border border-black ${currentReport.projectHealth === 'Red' ? 'bg-red-100' : currentReport.projectHealth === 'Amber' ? 'bg-amber-100' : 'bg-green-100'}`}>
+                      <h3 className="font-bold text-sm uppercase">Project Health</h3>
+                      <p className="text-xl font-bold">{currentReport.projectHealth}</p>
+                  </div>
+              </div>
+
+              {/* Sections */}
+              <div className="space-y-6">
+                  {currentReport.newThisWeek && (
+                      <div className="mb-4">
+                          <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase">New This Week</h3>
+                          <p className="whitespace-pre-wrap text-sm">{currentReport.newThisWeek}</p>
+                      </div>
+                  )}
+
+                  <div className="mb-4">
+                      <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase text-green-800">Success & Achievements</h3>
+                      <p className="whitespace-pre-wrap text-sm">{currentReport.mainSuccess || "No major achievements recorded."}</p>
+                  </div>
+
+                  <div className="mb-4">
+                      <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase text-red-800">Issues & Blockers</h3>
+                      <p className="whitespace-pre-wrap text-sm">{currentReport.mainIssue || "No blocking issues."}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                      <div>
+                          <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase text-orange-800">Incidents</h3>
+                          <p className="whitespace-pre-wrap text-sm">{currentReport.incident || "-"}</p>
+                      </div>
+                      <div>
+                          <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase text-blue-800">Organization</h3>
+                          <p className="whitespace-pre-wrap text-sm">{currentReport.orgaPoint || "-"}</p>
+                      </div>
+                  </div>
+
+                  {currentReport.otherSection && (
+                      <div className="mb-4">
+                          <h3 className="font-bold text-lg border-b border-gray-400 mb-2 uppercase">Other</h3>
+                          <p className="whitespace-pre-wrap text-sm">{currentReport.otherSection}</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )
+  }
+
   // --- DATA PROCESSING FOR ARCHIVES AND AUTO-FILL ---
 
   // 1. Sort all reports desc (Newest -> Oldest)
@@ -391,6 +467,9 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
   return (
     <div className="max-w-7xl mx-auto space-y-6 relative">
         
+        {/* Hidden Print View */}
+        {renderPrintView()}
+
         {/* FOLLOW UP MODAL */}
         {showFollowUpModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -538,7 +617,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
         
         {/* Header Tabs */}
         {/* ... (Existing tabs code) ... */}
-        <div className="flex space-x-4 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex space-x-4 border-b border-slate-200 dark:border-slate-700 no-print">
             <button 
                 onClick={() => setActiveTab('my-report')}
                 className={`pb-4 px-2 font-medium text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'my-report' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
@@ -560,7 +639,7 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
         </div>
 
         {activeTab === 'my-report' && (
-            <div className="animate-in fade-in space-y-8">
+            <div className="animate-in fade-in space-y-8 no-print">
                 {/* ... (Manager Feedback) ... */}
                 
                 {/* Input Section */}
@@ -594,6 +673,15 @@ const WeeklyReport: React.FC<WeeklyReportProps> = ({ reports, users, currentUser
                         </div>
                         
                         <div className="flex items-center gap-2">
+                            {/* Print Button */}
+                            <button 
+                                onClick={handlePrintReport}
+                                className="px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-bold flex items-center transition-colors border border-slate-200 dark:border-slate-600"
+                                title="Print / PDF"
+                            >
+                                <Printer className="w-4 h-4 mr-2" /> PDF
+                            </button>
+
                             {/* Language Toggle */}
                             {llmConfig && (
                                 <div className="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1 border border-slate-200 dark:border-slate-600 mr-2">

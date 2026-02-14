@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { WorkingGroup, WorkingGroupSession, User, Team, ActionItem, ActionItemStatus, WorkingGroupChecklistItem, UserRole, LLMConfig, TaskPriority, Decision } from '../types';
-import { Plus, Folder, Calendar, CheckSquare, Trash2, X, Save, Edit, UserPlus, Clock, Layout, AlertTriangle, MessageSquare, Siren, FileText, Sparkles, Bot, Loader2, Download, Copy, Flag, Layers, List, Edit2, Gavel } from 'lucide-react';
+import { Plus, Folder, Calendar, CheckSquare, Trash2, X, Save, Edit, UserPlus, Clock, Layout, AlertTriangle, MessageSquare, Siren, FileText, Sparkles, Bot, Loader2, Download, Copy, Flag, Layers, List, Edit2, Gavel, Printer } from 'lucide-react';
 import { generateId } from '../services/storage';
 import { generateWorkingGroupFullReport, generateWorkingGroupSessionReport } from '../services/llmService';
 import FormattedText from './FormattedText';
@@ -174,6 +174,10 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
             }
             setEditingSession(null);
         }
+    };
+
+    const handlePrintGroup = () => {
+        window.print();
     };
 
     // --- IMMUTABLE UPDATE HELPERS ---
@@ -453,6 +457,7 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
     const renderSessionModal = () => {
         if (!editingSession) return null;
         const { session } = editingSession;
+        const groupCategories = selectedGroup ? getGroupCategories(selectedGroup) : [];
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -710,6 +715,97 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
         );
     };
 
+    // --- PRINTABLE CONTENT COMPONENT ---
+    const renderPrintView = () => {
+        if (!selectedGroup) return null;
+        
+        return (
+            <div id="section-to-print" className="printable-area hidden print:block bg-white text-black p-8 font-serif">
+                {/* Header */}
+                <div className="border-b-2 border-black pb-4 mb-6">
+                    <h1 className="text-3xl font-bold uppercase tracking-wider mb-2">{selectedGroup.title}</h1>
+                    <div className="flex justify-between items-end">
+                        <div>
+                            <p className="text-sm text-gray-600">
+                                <strong>Project:</strong> {getProjectName(selectedGroup.projectId) || 'Standalone'}
+                            </p>
+                            <p className="text-sm text-gray-600">
+                                <strong>Members:</strong> {users.filter(u => selectedGroup.memberIds.includes(u.id)).map(u => `${u.firstName} ${u.lastName}`).join(', ')}
+                            </p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-sm text-gray-600">Export Date: {new Date().toLocaleDateString()}</p>
+                            <p className="text-sm font-bold">WORKING GROUP REPORT</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Content Loop */}
+                <div className="space-y-8">
+                    {selectedGroup.sessions.map((session, idx) => (
+                        <div key={session.id} className="avoid-break mb-8">
+                            {/* Session Header */}
+                            <div className="bg-gray-100 p-2 mb-3 border-l-4 border-black flex justify-between items-center">
+                                <h2 className="font-bold text-lg">Session: {session.date}</h2>
+                                <span className="text-xs font-mono">ID: {session.id.slice(0,6)}</span>
+                            </div>
+
+                            {/* Decisions */}
+                            {session.decisions && session.decisions.length > 0 && (
+                                <div className="mb-4 pl-4">
+                                    <h3 className="font-bold text-sm uppercase border-b border-gray-300 mb-2 inline-block">Key Decisions</h3>
+                                    <ul className="list-disc pl-5 text-sm space-y-1">
+                                        {session.decisions.map(d => (
+                                            <li key={d.id}>{d.text}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            {/* Actions Table */}
+                            {session.actionItems.length > 0 && (
+                                <div className="mb-4">
+                                    <table className="w-full text-xs border-collapse border border-gray-300">
+                                        <thead>
+                                            <tr className="bg-gray-200">
+                                                <th className="border border-gray-300 p-1 text-left w-1/2">Action</th>
+                                                <th className="border border-gray-300 p-1 text-center w-24">Owner</th>
+                                                <th className="border border-gray-300 p-1 text-center w-20">Due</th>
+                                                <th className="border border-gray-300 p-1 text-center w-20">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {session.actionItems.map(action => {
+                                                const ownerName = users.find(u => u.id === action.ownerId)?.firstName || action.ownerId || 'Unassigned';
+                                                return (
+                                                    <tr key={action.id}>
+                                                        <td className="border border-gray-300 p-1">{action.description}</td>
+                                                        <td className="border border-gray-300 p-1 text-center">{ownerName}</td>
+                                                        <td className="border border-gray-300 p-1 text-center">{action.dueDate}</td>
+                                                        <td className="border border-gray-300 p-1 text-center font-bold">
+                                                            {action.status === ActionItemStatus.DONE ? 'DONE' : action.status}
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {/* Notes */}
+                            {session.notes && (
+                                <div className="pl-4 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed border-l border-gray-200">
+                                    {session.notes}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
     // --- EMPTY STATE HANDLING ---
     if (!groups || groups.length === 0) {
         return (
@@ -737,6 +833,9 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
 
     return (
         <div className="flex h-[calc(100vh-6rem)] max-w-7xl mx-auto gap-6 relative">
+            {/* The Hidden Print View */}
+            {renderPrintView()}
+
             {renderSessionModal()}
             {renderGroupModal()}
             {renderActionModal()}
@@ -787,7 +886,7 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
             )}
 
             {/* Sidebar List */}
-            <div className="w-1/4 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+            <div className="w-1/4 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden no-print">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                     <h2 className="font-bold text-lg text-slate-900 dark:text-white">Working Groups</h2>
                     <button onClick={handleCreateGroup} className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm">
@@ -821,7 +920,7 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+            <div className="flex-1 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden no-print">
                 {selectedGroup ? (
                     <>
                         <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-start bg-slate-50 dark:bg-slate-950">
@@ -834,6 +933,17 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
                             </div>
                             
                             <div className="flex items-center gap-2">
+                                {/* Print Button */}
+                                <button 
+                                    onClick={handlePrintGroup}
+                                    className="px-3 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center transition-colors shadow-sm"
+                                    title="Save as PDF / Print"
+                                >
+                                    <Printer className="w-4 h-4 mr-1.5" /> PDF/Print
+                                </button>
+
+                                <div className="w-px h-6 bg-slate-300 dark:bg-slate-700 mx-1"></div>
+
                                 {/* Sort/Group Toggle */}
                                 <button 
                                     onClick={() => setGroupByFamily(!groupByFamily)}
@@ -989,7 +1099,7 @@ const WorkingGroupModule: React.FC<WorkingGroupProps> = ({ groups, users, teams,
                         </div>
                     </>
                 ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50 dark:bg-slate-900/50">
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50 dark:bg-slate-900/50 no-print">
                         <Folder className="w-20 h-20 mb-4 opacity-10" />
                         <p className="text-lg font-medium text-slate-500">Select a working group</p>
                         <p className="text-sm">View details and timeline on the right.</p>

@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency, TaskAction, TaskActionStatus, WorkingGroup } from '../types';
+import { Team, Project, Task, TaskStatus, TaskPriority, ProjectStatus, User, LLMConfig, ChecklistItem, ExternalDependency, TaskAction, TaskActionStatus, WorkingGroup, AuditLogEntry } from '../types';
 import { generateTeamReport, generateProjectRoadmap, generateDailyPlan } from '../services/llmService';
+import { generateId } from '../services/storage';
 import FormattedText from './FormattedText';
 import { 
     CheckCircle2, Clock, AlertCircle, PlayCircle, PauseCircle, Plus, 
     ChevronDown, Bot, Calendar, Users as UsersIcon, MoreHorizontal, 
-    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit, Archive, RotateCcw, ExternalLink, Coins, Star, Zap, Globe
+    Flag, UserCircle2, Pencil, AlertTriangle, X, Save, Trash2, Scale, ListTodo, ArrowUpAz, Download, Copy, Eye, EyeOff, Sparkles, Briefcase, Link2, CheckSquare, Square, UserPlus, MessageCircle, Map, Crown, PenTool, LayoutList, BrainCircuit, Archive, RotateCcw, ExternalLink, Coins, Star, Zap, Globe, History
 } from 'lucide-react';
 
 interface ProjectTrackerProps {
@@ -30,6 +31,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [dailyPlan, setDailyPlan] = useState('');
   const [loadingPlan, setLoadingPlan] = useState(false);
+
+  // Audit / History State
+  const [viewingAuditProjectId, setViewingAuditProjectId] = useState<string | null>(null);
 
   // Selection State for AI Report
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -97,6 +101,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
             setEditingTask(null);
             setShowRoadmapModal(false);
             setShowPlanModal(false);
+            setViewingAuditProjectId(null);
         }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -104,6 +109,21 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   }, []);
 
   // --- Helper Functions ---
+
+  // Helper to add audit entry to a project object
+  // LIMIT: Keeps only the last 20 entries
+  const addAuditEntry = (project: Project, action: string, target: string, details?: string): AuditLogEntry[] => {
+      const newEntry: AuditLogEntry = {
+          id: generateId(),
+          timestamp: new Date().toISOString(),
+          userName: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+          action,
+          target,
+          details
+      };
+      // Prepend and Slice
+      return [newEntry, ...(project.auditLog || [])].slice(0, 20);
+  };
 
   const toggleHighlight = (projectId: string) => {
       setHighlightedProjectIds(prev => 
@@ -266,8 +286,11 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           docUrls: [],
           dependencies: [],
           externalDependencies: [],
-          additionalDescriptions: []
+          additionalDescriptions: [],
+          auditLog: [] // Init Audit Log
       };
+      // Log creation
+      newProject.auditLog = addAuditEntry(newProject, "Project Created", "Project", "Initial creation");
       setEditingProject(newProject);
   };
 
@@ -280,6 +303,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                   if (project) {
                       project.isArchived = true;
                       project.status = ProjectStatus.DONE; // Auto-set status to Done
+                      project.auditLog = addAuditEntry(project, "Project Archived", "Project", "Status set to Done");
                   }
               });
               if(expandedProjectId === projectId) setExpandedProjectId(null);
@@ -294,6 +318,7 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
               const project = team.projects.find(p => p.id === projectId);
               if (project) {
                   project.isArchived = false;
+                  project.auditLog = addAuditEntry(project, "Project Restored", "Project", "Unarchived");
               }
           });
           setSelectedProjectIds(prev => prev.filter(id => id !== projectId));
@@ -334,7 +359,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       updateTeamData(team => {
           const project = team.projects.find(p => p.id === projectId);
           if(project) {
+              const taskTitle = project.tasks.find(t => t.id === taskId)?.title || 'Unknown Task';
               project.tasks = project.tasks.filter(t => t.id !== taskId);
+              project.auditLog = addAuditEntry(project, "Task Deleted", `Task: ${taskTitle}`, "Removed from project");
           }
       });
   };
@@ -344,7 +371,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
         const project = team.projects.find(p => p.id === projectId);
         if(project) {
             const task = project.tasks.find(t => t.id === taskId);
-            if(task) (task as any)[field] = value;
+            if(task) {
+                const oldVal = (task as any)[field];
+                (task as any)[field] = value;
+                // Add Audit Log
+                project.auditLog = addAuditEntry(project, `Task ${field} updated`, `Task: ${task.title}`, `${oldVal} -> ${value}`);
+            }
         }
     });
   };
@@ -352,7 +384,12 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
   const handleProjectUpdate = (projectId: string, field: keyof Project, value: any) => {
     updateTeamData(team => {
         const project = team.projects.find(p => p.id === projectId);
-        if(project) (project as any)[field] = value;
+        if(project) {
+            const oldVal = (project as any)[field];
+            (project as any)[field] = value;
+            // Add Audit Log
+            project.auditLog = addAuditEntry(project, `Project ${field} updated`, "Project", `${oldVal} -> ${value}`);
+        }
     });
   };
 
@@ -361,8 +398,14 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       updateTeamData(team => {
           const idx = team.projects.findIndex(p => p.id === editingProject.id);
           if (idx !== -1) {
-              team.projects[idx] = editingProject;
+              // Update existing - Note: editingProject might lack auditLog if created freshly locally
+              // We should merge logs if possible or just push "Project Updated"
+              const existingProject = team.projects[idx];
+              const updatedProject = { ...editingProject, auditLog: existingProject.auditLog };
+              updatedProject.auditLog = addAuditEntry(updatedProject, "Project Edited", "Project", "Details updated via modal");
+              team.projects[idx] = updatedProject;
           } else {
+              // New Project (audit log initialized in creation)
               team.projects.push(editingProject);
           }
       });
@@ -376,9 +419,13 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
         if(project) {
             const idx = project.tasks.findIndex(t => t.id === editingTask.task.id);
             if(idx !== -1) {
+                // Update existing task
                 project.tasks[idx] = editingTask.task;
+                project.auditLog = addAuditEntry(project, "Task Edited", `Task: ${editingTask.task.title}`, "Details updated via modal");
             } else {
+                // New Task
                 project.tasks.push(editingTask.task);
+                project.auditLog = addAuditEntry(project, "Task Created", `Task: ${editingTask.task.title}`, "Added to project");
             }
         }
       });
@@ -591,6 +638,9 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
       });
   }, [currentTeam, showArchived, searchTerm, sortBy, highlightedProjectIds]);
 
+  // Project whose audit is being viewed
+  const auditProject = viewingAuditProjectId ? currentTeam.projects.find(p => p.id === viewingAuditProjectId) : null;
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto relative">
       
@@ -600,6 +650,59 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
           ))}
       </datalist>
 
+      {/* Audit Log Modal */}
+      {viewingAuditProjectId && auditProject && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-150">
+                  <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950 rounded-t-2xl">
+                      <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                          <History className="w-5 h-5 text-indigo-500" />
+                          Audit Trail: {auditProject.name}
+                      </h3>
+                      <button onClick={() => setViewingAuditProjectId(null)} className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="p-6 overflow-y-auto flex-1 bg-white dark:bg-slate-900">
+                      {(!auditProject.auditLog || auditProject.auditLog.length === 0) ? (
+                          <div className="text-center py-12 text-slate-400">
+                              <History className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                              <p>No changes recorded yet.</p>
+                          </div>
+                      ) : (
+                          <div className="relative border-l border-slate-200 dark:border-slate-700 ml-4 space-y-6">
+                              {auditProject.auditLog.map((log) => (
+                                  <div key={log.id} className="mb-6 ml-6 relative">
+                                      <span className="flex absolute -left-[31px] justify-center items-center w-6 h-6 bg-indigo-100 dark:bg-indigo-900 rounded-full ring-4 ring-white dark:ring-slate-900">
+                                          <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>
+                                      </span>
+                                      <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-700">
+                                          <div className="flex justify-between items-start mb-2">
+                                              <span className="text-sm font-bold text-slate-900 dark:text-white">{log.action}</span>
+                                              <span className="text-xs text-slate-500 font-mono">{new Date(log.timestamp).toLocaleString()}</span>
+                                          </div>
+                                          <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium mb-1">{log.target}</p>
+                                          {log.details && (
+                                              <p className="text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700 font-mono overflow-x-auto">
+                                                  {log.details}
+                                              </p>
+                                          )}
+                                          <p className="text-[10px] text-slate-400 mt-2 text-right">By {log.userName}</p>
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+                  </div>
+                  <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50 dark:bg-slate-950 rounded-b-2xl">
+                      <button onClick={() => setViewingAuditProjectId(null)} className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg font-medium text-sm">Close</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ... (Existing Modal Code: What to do today, AI Roadmap, Project Edit, Task Edit) ... */}
+      
       {/* What to do today Modal */}
       {showPlanModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1235,6 +1338,15 @@ const ProjectTracker: React.FC<ProjectTrackerProps> = ({ teams, users, currentUs
                                      <div className="bg-indigo-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
                                  </div>
                              </div>
+
+                             {/* AUDIT BUTTON */}
+                             <button
+                                onClick={(e) => { e.stopPropagation(); setViewingAuditProjectId(project.id); }}
+                                className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                title="View Audit Trail / History"
+                             >
+                                 <History className="w-4 h-4" />
+                             </button>
 
                              <button 
                                 onClick={(e) => { e.stopPropagation(); setEditingProject(project); }}
